@@ -1,18 +1,38 @@
 import axios from 'axios';
 
+const resolveBaseUrl = () => {
+  let url = import.meta.env.VITE_API_URL || 'http://localhost:5010/api';
+  // If the browser page is loaded over HTTPS, upgrade any remote HTTP URL to HTTPS to prevent Mixed Content blocking
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+      url = url.replace(/^http:\/\//i, 'https://');
+    }
+  }
+  return url;
+};
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5010/api',
+  baseURL: resolveBaseUrl(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Attach JWT token from localStorage to every outgoing request
+// Attach JWT token from localStorage to every outgoing request and enforce HTTPS
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('wt_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Guarantee requests are sent over HTTPS when running on an HTTPS origin
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    if (config.baseURL && config.baseURL.startsWith('http://') && !config.baseURL.includes('localhost') && !config.baseURL.includes('127.0.0.1')) {
+      config.baseURL = config.baseURL.replace(/^http:\/\//i, 'https://');
+    }
+    if (config.url && config.url.startsWith('http://') && !config.url.includes('localhost') && !config.url.includes('127.0.0.1')) {
+      config.url = config.url.replace(/^http:\/\//i, 'https://');
+    }
   }
   return config;
 }, (error) => Promise.reject(error));

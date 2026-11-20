@@ -16,6 +16,8 @@ import {
   Check,
   Calendar,
   Layers,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { getDevices, createDevice, updateDevice, deleteDevice } from '../services/api';
 
@@ -23,6 +25,8 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   // Top Row Inline Registration Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -181,6 +185,11 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
       dev.location?.toLowerCase().includes(term)
     );
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredDevices.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredDevices.length);
+  const paginatedDevices = filteredDevices.slice(startIndex, endIndex);
 
   return (
     <div className="dashboard-wrapper">
@@ -391,7 +400,7 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                     </td>
                   </tr>
                 ) : (
-                  filteredDevices.map((dev, idx) => {
+                  paginatedDevices.map((dev, idx) => {
                     const isEditing = editingId === (dev._id || dev.deviceId);
                     const formattedDate = new Date(dev.createdAt || Date.now()).toLocaleDateString('en-US', {
                       month: 'short',
@@ -518,6 +527,39 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                 )}
               </tbody>
             </table>
+
+            {/* Table Pagination Bar */}
+            <div className="table-pagination-bar" style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', padding: '12px 16px', borderTop: '1px solid #E2E8F0' }}>
+              <div style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
+                Showing {filteredDevices.length > 0 ? startIndex + 1 : 0} to {endIndex} of {filteredDevices.length} devices
+              </div>
+
+              <div className="pagination-buttons-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="page-nav-btn"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft size={16} />
+                  <span>Prev</span>
+                </button>
+
+                <span className="page-indicator" style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  className="page-nav-btn"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  <span>Next</span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </main>

@@ -20,6 +20,8 @@ import {
   Shield,
   Eye,
   EyeOff,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 import Sidebar from '../components/Sidebar';
@@ -59,6 +61,8 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState({});
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const togglePasswordVisibility = (userId) => {
     setVisiblePasswords((prev) => ({
@@ -209,6 +213,11 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
   const totalAdmins = users.filter((u) => u.role === 'admin').length;
   const totalOperators = users.filter((u) => u.role === 'operator').length;
 
+  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, users.length);
+  const paginatedUsers = users.slice(startIndex, endIndex);
+
   return (
     <div className="app-container">
       {/* Sidebar with Admin Console active */}
@@ -350,7 +359,7 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => {
+                    {paginatedUsers.map((u) => {
                       const isCurrentUser = currentUser && (currentUser.id === u._id || currentUser.email === u.email);
                       return (
                         <tr key={u._id} className={isCurrentUser ? 'current-user-row' : ''}>
@@ -444,6 +453,39 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                     })}
                   </tbody>
                 </table>
+
+                {/* Admin Table Pagination Bar */}
+                <div className="table-pagination-bar" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', padding: '12px 16px', borderTop: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
+                    Showing {users.length > 0 ? startIndex + 1 : 0} to {endIndex} of {users.length} credentials
+                  </div>
+
+                  <div className="pagination-buttons-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="page-nav-btn"
+                      disabled={currentPage <= 1 || loading}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft size={16} />
+                      <span>Prev</span>
+                    </button>
+
+                    <span className="page-indicator" style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      className="page-nav-btn"
+                      disabled={currentPage >= totalPages || loading}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      <span>Next</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

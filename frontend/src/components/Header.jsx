@@ -18,13 +18,14 @@ const Header = ({
     if (loading) return;
     setLoading(true);
     try {
+      const targetAction = isMotorOn ? 'OFF' : 'ON';
       if (isMotorOn) {
         await forceMotorOff('dashboard_header', selectedDeviceId);
       } else {
         await forceMotorOn('dashboard_header', selectedDeviceId);
       }
       if (onMotorStateChanged) {
-        onMotorStateChanged();
+        onMotorStateChanged(targetAction);
       }
     } catch (err) {
       console.error('Failed to toggle motor:', err);

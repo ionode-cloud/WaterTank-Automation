@@ -125,16 +125,19 @@ exports.getMotorConsumption = async (req, res) => {
  */
 exports.forceMotorOn = async (req, res) => {
   try {
-    const result = await iotService.executeMotorCommand('ON', req.body.source || 'dashboard_header');
-    const state = iotService.getRuntimeState();
+    const rawDevId = req.body?.deviceId || req.body?.deviceid || req.query?.deviceId || req.query?.id;
+    const devId = rawDevId ? String(rawDevId).trim().toUpperCase() : null;
+    const result = await iotService.executeMotorCommand('ON', req.body.source || 'dashboard_header', devId);
+    const state = iotService.getRuntimeState(devId);
     
     // Save record to ForceControl model
     await ForceControl.create({
+      deviceId: devId || state?.deviceId || 'WT-DEV-001',
       action: 'FORCE_ON',
       motorStatus: 'ON',
       triggeredBy: req.body.source || 'dashboard_header',
-      waterLevelAtTrigger: state.waterLevel || 0,
-      note: req.body.note || 'Force ON command executed',
+      waterLevelAtTrigger: state?.waterLevel || 0,
+      note: req.body.note || `Force ON command executed for ${devId || 'system'}`,
       status: 'SUCCESS',
     });
 
@@ -155,16 +158,19 @@ exports.forceMotorOn = async (req, res) => {
  */
 exports.forceMotorOff = async (req, res) => {
   try {
-    const result = await iotService.executeMotorCommand('OFF', req.body.source || 'dashboard_header');
-    const state = iotService.getRuntimeState();
+    const rawDevId = req.body?.deviceId || req.body?.deviceid || req.query?.deviceId || req.query?.id;
+    const devId = rawDevId ? String(rawDevId).trim().toUpperCase() : null;
+    const result = await iotService.executeMotorCommand('OFF', req.body.source || 'dashboard_header', devId);
+    const state = iotService.getRuntimeState(devId);
 
     // Save record to ForceControl model
     await ForceControl.create({
+      deviceId: devId || state?.deviceId || 'WT-DEV-001',
       action: 'FORCE_OFF',
       motorStatus: 'OFF',
       triggeredBy: req.body.source || 'dashboard_header',
-      waterLevelAtTrigger: state.waterLevel || 0,
-      note: req.body.note || 'Force OFF command executed',
+      waterLevelAtTrigger: state?.waterLevel || 0,
+      note: req.body.note || `Force OFF command executed for ${devId || 'system'}`,
       status: 'SUCCESS',
     });
 

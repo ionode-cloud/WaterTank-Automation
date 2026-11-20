@@ -116,7 +116,34 @@ const updateRuntimeState = (partial) => {
  */
 const getMotorStats = async (deviceId) => {
   const cleanId = deviceId ? String(deviceId).toUpperCase() : null;
-  const state = getRuntimeState(cleanId);
+  let state = getRuntimeState(cleanId);
+
+  // If not in memory yet, query SensorData DB for this device
+  if (!state && cleanId) {
+    try {
+      const SensorData = require('../models/SensorData');
+      const latestSensor = await SensorData.findOne({ deviceId: cleanId }).sort({ timestamp: -1 });
+      if (latestSensor) {
+        state = {
+          deviceId: cleanId,
+          motorStatus: latestSensor.motorStatus || 'OFF',
+          tankCapacity: latestSensor.tankCapacity || 1000,
+          waterConsumption: latestSensor.waterConsumption || 0,
+          waterLevel: latestSensor.waterLevel || 0,
+          voltage: latestSensor.voltage || 0,
+          current: latestSensor.current || 0,
+          power: latestSensor.power || 0,
+          powerFactor: latestSensor.powerFactor || 0,
+          energyConsumption: latestSensor.energyConsumption || 0,
+          hasData: true,
+        };
+        deviceRuntimeStates[cleanId] = { ...state };
+      }
+    } catch (dbErr) {
+      console.error('Error fetching fallback state from SensorData:', dbErr.message);
+    }
+  }
+
   const now = new Date();
 
   if (!state) {
@@ -184,26 +211,29 @@ const getMotorStats = async (deviceId) => {
 /**
  * Execute Force Motor Command (ON or OFF)
  */
-const executeMotorCommand = async (commandType, source = 'dashboard') => {
+const executeMotorCommand = async (commandType, source = 'dashboard', deviceId = null) => {
   const targetStatus = commandType.toUpperCase();
   if (!['ON', 'OFF'].includes(targetStatus)) {
     throw new Error('Invalid command: must be ON or OFF');
   }
 
-  // Prevent redundant identical commands
-  if (runtimeState.motorStatus === targetStatus) {
-    return {
-      success: true,
-      message: `Motor is already ${targetStatus}`,
-      motorStatus: targetStatus,
-      alreadyInState: true,
-    };
+  // Resolve target device ID
+  const Device = require('../models/Device');
+  let cleanId = deviceId ? String(deviceId).trim().toUpperCase() : null;
+  let devDoc = null;
+
+  if (cleanId) {
+    devDoc = await Device.findOne({ deviceId: cleanId });
+  } else {
+    devDoc = await Device.findOne().sort({ createdAt: 1 });
+    cleanId = devDoc ? devDoc.deviceId : (runtimeState.deviceId || 'WT-DEV-001');
   }
 
   const requestedAt = new Date();
 
   // Create audit command record
   const cmdRecord = new MotorCommand({
+    deviceId: cleanId,
     command: targetStatus,
     requestedAt,
     source,
@@ -212,59 +242,100 @@ const executeMotorCommand = async (commandType, source = 'dashboard') => {
   await cmdRecord.save();
 
   try {
-    // Hardware bridge hook:
-    // If real hardware is connected via MQTT/HTTP, dispatch command and await ACK
-    // Otherwise acknowledge via simulation controller
     const acknowledgedAt = new Date();
 
-    // Close previous open history record if any
-    const previousOpenRecord = await MotorHistory.findOne({ endTime: null }).sort({ startTime: -1 });
+    // Close previous open history record for this device if any
+    const previousOpenRecord = await MotorHistory.findOne({
+      $or: [{ deviceId: cleanId }, { deviceId: { $exists: false } }],
+      endTime: null,
+    }).sort({ startTime: -1 });
+
     if (previousOpenRecord) {
       previousOpenRecord.endTime = acknowledgedAt;
       previousOpenRecord.duration = Math.max(0, Math.floor((acknowledgedAt - previousOpenRecord.startTime) / 1000));
       await previousOpenRecord.save();
     }
 
-    // Create new motor history record
+    // Create new motor history record with deviceId
     const newHistory = new MotorHistory({
+      deviceId: cleanId,
       motorStatus: targetStatus,
       eventType: targetStatus === 'ON' ? 'FORCE_ON' : 'FORCE_OFF',
       startTime: acknowledgedAt,
       endTime: null,
       duration: 0,
       timestamp: acknowledgedAt,
-      note: `Triggered by ${source}`,
+      note: `Triggered by ${source} (${cleanId})`,
     });
     await newHistory.save();
 
-    // Update runtime state
+    // Get current device state or create realistic defaults
+    const existingDevState = deviceRuntimeStates[cleanId] || (cleanId === runtimeState.deviceId ? runtimeState : null);
+    const cap = devDoc?.tankCapacity || existingDevState?.tankCapacity || 1000;
+    const con = existingDevState?.waterConsumption !== undefined && existingDevState.waterConsumption > 0
+      ? existingDevState.waterConsumption
+      : Math.round(cap * 0.65);
+    const wl = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : 65;
+
+    const baseDevState = existingDevState ? { ...existingDevState } : {
+      deviceId: cleanId,
+      tankCapacity: cap,
+      waterConsumption: con,
+      waterLevel: wl,
+      powerFactor: 0.92,
+      energyConsumption: 0.45,
+    };
+
+    baseDevState.deviceId = cleanId;
+    baseDevState.motorStatus = targetStatus;
+    baseDevState.tankCapacity = cap;
+    baseDevState.waterConsumption = con;
+    baseDevState.waterLevel = wl;
+    baseDevState.isHardwareConnected = true;
+    baseDevState.hasData = true;
+
     if (targetStatus === 'ON') {
-      runtimeState.motorStatus = 'ON';
-      runtimeState.lastOnTime = acknowledgedAt;
-      runtimeState.voltage = 230 + (Math.random() * 4 - 2);
-      runtimeState.current = +(6.5 + (Math.random() * 0.8 - 0.4)).toFixed(2);
-      runtimeState.power = Math.round(runtimeState.voltage * runtimeState.current * runtimeState.powerFactor);
+      baseDevState.lastOnTime = acknowledgedAt;
+      baseDevState.voltage = +(230 + (Math.random() * 4 - 2)).toFixed(1);
+      baseDevState.current = +(6.5 + (Math.random() * 0.8 - 0.4)).toFixed(2);
+      baseDevState.powerFactor = +(baseDevState.powerFactor || 0.92).toFixed(2);
+      baseDevState.power = Math.round(baseDevState.voltage * baseDevState.current * baseDevState.powerFactor);
+      baseDevState.energyConsumption = +((baseDevState.energyConsumption || 0.45) + 0.005).toFixed(3);
     } else {
-      runtimeState.motorStatus = 'OFF';
-      runtimeState.lastOffTime = acknowledgedAt;
-      runtimeState.voltage = 232 + (Math.random() * 3 - 1.5);
-      runtimeState.current = 0.0;
-      runtimeState.power = 0;
+      baseDevState.lastOffTime = acknowledgedAt;
+      baseDevState.voltage = +(232 + (Math.random() * 3 - 1.5)).toFixed(1);
+      baseDevState.current = 0.0;
+      baseDevState.power = 0;
+      baseDevState.powerFactor = +(baseDevState.powerFactor || 0.92).toFixed(2);
     }
 
-    // Save snapshot to SensorData
+    // Update in-memory runtime maps
+    deviceRuntimeStates[cleanId] = { ...baseDevState };
+    runtimeState = { ...baseDevState };
+
+    // Save snapshot to SensorData with deviceId
     const sensorSnapshot = new SensorData({
-      voltage: +runtimeState.voltage.toFixed(1),
-      current: runtimeState.current,
-      power: runtimeState.power,
-      powerFactor: runtimeState.powerFactor,
-      waterLevel: runtimeState.waterLevel,
-      motorStatus: runtimeState.motorStatus,
-      energyConsumption: +runtimeState.energyConsumption.toFixed(3),
-      source: runtimeState.source,
+      deviceId: cleanId,
+      voltage: baseDevState.voltage,
+      current: baseDevState.current,
+      power: baseDevState.power,
+      powerFactor: baseDevState.powerFactor,
+      tankCapacity: cap,
+      waterConsumption: con,
+      waterLevel: wl,
+      motorStatus: targetStatus,
+      energyConsumption: baseDevState.energyConsumption,
+      source: source,
       timestamp: acknowledgedAt,
     });
     await sensorSnapshot.save();
+
+    // Update Device status in MongoDB
+    if (devDoc) {
+      devDoc.status = 'ONLINE';
+      devDoc.lastActive = acknowledgedAt;
+      await devDoc.save();
+    }
 
     // Update command record
     cmdRecord.status = 'success';
@@ -274,19 +345,31 @@ const executeMotorCommand = async (commandType, source = 'dashboard') => {
     // Broadcast through Socket.IO
     if (ioInstance) {
       ioInstance.emit('motor_status_update', {
+        deviceId: cleanId,
         motorStatus: targetStatus,
-        lastOnTime: runtimeState.lastOnTime,
-        lastOffTime: runtimeState.lastOffTime,
+        lastOnTime: baseDevState.lastOnTime,
+        lastOffTime: baseDevState.lastOffTime,
         timestamp: acknowledgedAt,
       });
-      ioInstance.emit('sensor_update', runtimeState);
+      ioInstance.emit('motor_status_changed', {
+        deviceId: cleanId,
+        motorStatus: targetStatus,
+        eventType: targetStatus === 'ON' ? 'FORCE_ON' : 'FORCE_OFF',
+        timestamp: acknowledgedAt,
+      });
+      ioInstance.emit('sensor_update', {
+        ...baseDevState,
+        deviceId: cleanId,
+        timestamp: acknowledgedAt,
+      });
     }
 
     return {
       success: true,
-      message: `Motor command ${targetStatus} acknowledged and executed successfully`,
+      message: `Motor command ${targetStatus} acknowledged and executed successfully for ${cleanId}`,
       commandId: cmdRecord._id,
       motorStatus: targetStatus,
+      deviceId: cleanId,
       acknowledgedAt,
     };
   } catch (error) {

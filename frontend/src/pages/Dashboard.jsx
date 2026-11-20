@@ -20,6 +20,16 @@ import {
   MapPin,
   ArrowLeft,
   ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  Clock,
+  Filter,
+  Search,
+  Download,
+  RefreshCw,
+  FileSpreadsheet,
+  Layers,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -39,9 +49,11 @@ import {
   getDashboardOverview,
   getPowerHistory,
   getMotorConsumption,
+  getMotorHistory,
   forceMotorOn,
   forceMotorOff,
   getDevices,
+  getData,
 } from '../services/api';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
@@ -464,7 +476,7 @@ const MotorControlCard = ({ motorData, selectedDeviceId, hasData = true, onMotor
         : await forceMotorOff('dashboard', selectedDeviceId);
       if (res.data?.success) {
         setFeedback({ type: 'success', text: `Motor ${command} confirmed by controller` });
-        if (onMotorStateChanged) onMotorStateChanged();
+        if (onMotorStateChanged) onMotorStateChanged(command);
       } else {
         setFeedback({ type: 'error', text: res.data?.message || 'Command rejected' });
       }
@@ -538,9 +550,9 @@ const MotorControlCard = ({ motorData, selectedDeviceId, hasData = true, onMotor
       <div className="motor-buttons-row">
         <button
           className="btn-force-on"
-          disabled={isMotorOn || loadingAction !== null}
+          disabled={loadingAction !== null}
           onClick={() => handleCommand('ON')}
-          title={isMotorOn ? 'Motor is already running' : 'Force switch motor ON'}
+          title={isMotorOn ? 'Motor is currently ON - Click to re-assert Force ON' : 'Force switch motor ON'}
         >
           {loadingAction === 'ON' ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="#FFFFFF" />}
           <span>Force ON</span>
@@ -548,9 +560,9 @@ const MotorControlCard = ({ motorData, selectedDeviceId, hasData = true, onMotor
 
         <button
           className="btn-force-off"
-          disabled={!isMotorOn || loadingAction !== null}
+          disabled={loadingAction !== null}
           onClick={() => handleCommand('OFF')}
-          title={!isMotorOn ? 'Motor is already stopped' : 'Force switch motor OFF'}
+          title={!isMotorOn ? 'Motor is currently OFF - Click to re-assert Force OFF' : 'Force switch motor OFF'}
         >
           {loadingAction === 'OFF' ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} fill="#FFFFFF" />}
           <span>Force OFF</span>
@@ -677,6 +689,599 @@ const MotorHistoryChart = ({ historyData }) => {
 };
 
 /* ==========================================================================
+   9. Subcomponent: DashboardHistoryTable (Motor ON/OFF Run Hours & Telemetry)
+   Requirement: "inside dasboard after Data Graphic & Control this tab add history table here show every data with how may hour on and off motor"
+   ========================================================================== */
+const formatDuration = (seconds) => {
+  if (!seconds || seconds <= 0) return '0s';
+  const s = Math.round(seconds);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
+};
+
+const formatDecimalHours = (seconds) => {
+  if (!seconds || seconds <= 0) return '0.00 hrs';
+  return `${(seconds / 3600).toFixed(2)} hrs`;
+};
+
+const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
+  const [motorRecords, setMotorRecords] = useState([]);
+  const [telemetryRecords, setTelemetryRecords] = useState([]);
+  const [activeTab, setActiveTab] = useState('motor'); // 'motor' | 'telemetry'
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'ON' | 'OFF'
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Fetch history records from backend
+  const fetchTableData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [motorRes, telemRes] = await Promise.all([
+        getMotorHistory(100, selectedDeviceId),
+        getData({ limit: 50, deviceId: selectedDeviceId }),
+      ]);
+
+      if (motorRes.data?.success && Array.isArray(motorRes.data.data)) {
+        setMotorRecords(motorRes.data.data);
+      }
+      if (telemRes.data?.success && Array.isArray(telemRes.data.data)) {
+        setTelemetryRecords(telemRes.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load dashboard history records:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    fetchTableData();
+  }, [fetchTableData]);
+
+  // Real-time live listener for motor events & sensor updates
+  useEffect(() => {
+    const handleMotorChanged = (data) => {
+      if (selectedDeviceId && data.deviceId && data.deviceId !== selectedDeviceId) return;
+      fetchTableData();
+    };
+
+    const handleSensorUpdate = (data) => {
+      if (selectedDeviceId && data.deviceId && data.deviceId !== selectedDeviceId) return;
+      setTelemetryRecords((prev) => [data, ...prev.slice(0, 49)]);
+    };
+
+    socket.on('motor_status_changed', handleMotorChanged);
+    socket.on('sensor_update', handleSensorUpdate);
+
+    return () => {
+      socket.off('motor_status_changed', handleMotorChanged);
+      socket.off('sensor_update', handleSensorUpdate);
+    };
+  }, [selectedDeviceId, fetchTableData]);
+
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    await fetchTableData();
+    setTimeout(() => setRefreshing(false), 600);
+  };
+
+  // Helper to calculate ongoing duration if endTime is null
+  const getItemDuration = (item) => {
+    if (item.duration && item.duration > 0) return item.duration;
+    if (!item.endTime && item.startTime) {
+      return Math.max(0, Math.floor((Date.now() - new Date(item.startTime).getTime()) / 1000));
+    }
+    return 0;
+  };
+
+  // Aggregated KPI Stats
+  const totalOnSeconds = motorRecords
+    .filter((e) => e.motorStatus === 'ON')
+    .reduce((acc, curr) => acc + getItemDuration(curr), 0);
+
+  const totalOffSeconds = motorRecords
+    .filter((e) => e.motorStatus === 'OFF')
+    .reduce((acc, curr) => acc + getItemDuration(curr), 0);
+
+  const totalOnHours = (totalOnSeconds / 3600).toFixed(2);
+  const totalOffHours = (totalOffSeconds / 3600).toFixed(2);
+  const totalOperations = motorRecords.length;
+
+  // Filtered Motor Events
+  const filteredMotorRecords = motorRecords.filter((rec) => {
+    if (statusFilter !== 'ALL' && rec.motorStatus !== statusFilter) return false;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      const matchType = rec.eventType?.toLowerCase().includes(term);
+      const matchNote = rec.note?.toLowerCase().includes(term);
+      const matchDev = rec.deviceId?.toLowerCase().includes(term);
+      if (!matchType && !matchNote && !matchDev) return false;
+    }
+    return true;
+  });
+
+  // Filtered Telemetry Records
+  const filteredTelemetryRecords = telemetryRecords.filter((rec) => {
+    if (statusFilter !== 'ALL' && rec.motorStatus !== statusFilter) return false;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      const matchDev = rec.deviceId?.toLowerCase().includes(term);
+      if (!matchDev) return false;
+    }
+    return true;
+  });
+
+  // Pagination
+  const activeRecords = activeTab === 'motor' ? filteredMotorRecords : filteredTelemetryRecords;
+  const totalPages = Math.max(1, Math.ceil(activeRecords.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, activeRecords.length);
+  const paginatedRecords = activeRecords.slice(startIndex, endIndex);
+
+  // Generate numbered pages for pagination
+  const getPageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    if (currentPage <= 4) {
+      return [1, 2, 3, 4, 5, '...', totalPages];
+    }
+    if (currentPage >= totalPages - 3) {
+      return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    }
+    return [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages];
+  };
+
+  // CSV Export Download
+  const handleExportCSV = () => {
+    if (activeRecords.length === 0) return;
+    let csvContent = '';
+    if (activeTab === 'motor') {
+      const headers = ['#', 'Device ID', 'Date & Time', 'Status', 'Duration (Seconds)', 'Hours Formatted', 'Hours Decimal'];
+      const rows = filteredMotorRecords.map((e, idx) => {
+        const dur = getItemDuration(e);
+        return [
+          idx + 1,
+          e.deviceId || selectedDeviceId || 'N/A',
+          new Date(e.startTime || e.timestamp).toLocaleString(),
+          e.motorStatus,
+          dur,
+          formatDuration(dur),
+          (dur / 3600).toFixed(2),
+        ];
+      });
+      csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    } else {
+      const headers = ['#', 'Device ID', 'Date & Time', 'Water Level (%)', 'Water (L)', 'Motor Status', 'Voltage (V)', 'Current (A)', 'Power (W)', 'Energy (kWh)'];
+      const rows = filteredTelemetryRecords.map((t, idx) => [
+        idx + 1,
+        t.deviceId || selectedDeviceId || 'N/A',
+        new Date(t.timestamp).toLocaleString(),
+        t.waterLevel || 0,
+        t.waterConsumption || 0,
+        t.motorStatus || 'OFF',
+        t.voltage || 0,
+        t.current || 0,
+        t.power || 0,
+        t.energyConsumption || 0,
+      ]);
+      csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${activeTab}_history_${selectedDeviceId || 'device'}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="dash-card history-table-container-card">
+      {/* 1. Header with Title & Action Controls */}
+      <div className="history-table-header-wrap">
+        <div className="history-table-title-box">
+          <div className="history-table-icon-badge">
+            <Clock size={20} className="text-blue" />
+          </div>
+          <div>
+            <h3 className="history-table-heading">Motor Operation & Telemetry History</h3>
+            <p className="history-table-subheading">
+              Detailed tracking of pump state transitions, cumulative ON/OFF runtime hours, and historical sensor data
+            </p>
+          </div>
+        </div>
+
+        <div className="history-table-actions">
+          {/* View Mode Toggle: Motor Hours vs Telemetry */}
+          <div className="history-view-toggle">
+            <button
+              type="button"
+              className={`toggle-tab-btn ${activeTab === 'motor' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('motor'); setCurrentPage(1); }}
+            >
+              <Zap size={14} />
+              <span>Motor ON / OFF Hours</span>
+              <span className="count-chip">{motorRecords.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`toggle-tab-btn ${activeTab === 'telemetry' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('telemetry'); setCurrentPage(1); }}
+            >
+              <Activity size={14} />
+              <span>Telemetry Data</span>
+              <span className="count-chip">{telemetryRecords.length}</span>
+            </button>
+          </div>
+
+          {/* Export CSV Button */}
+          <button
+            type="button"
+            className="btn-history-export"
+            onClick={handleExportCSV}
+            title="Download CSV Spreadsheet"
+            disabled={activeRecords.length === 0}
+          >
+            <Download size={15} />
+            <span>Export CSV</span>
+          </button>
+
+          {/* Refresh Button */}
+          <button
+            type="button"
+            className={`btn-history-refresh ${refreshing ? 'spinning' : ''}`}
+            onClick={handleManualRefresh}
+            title="Refresh Table Data"
+          >
+            <RefreshCw size={15} />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Top Summary KPI Stats Bar (Cumulative Hours ON & OFF) */}
+      <div className="history-kpi-bar">
+        <div className="history-kpi-chip kpi-on">
+          <div className="chip-icon-box on">
+            <Play size={16} />
+          </div>
+          <div className="chip-text-group">
+            <span className="chip-label">Total Motor ON Time</span>
+            <span className="chip-value">
+              {totalOnHours} <span className="unit">hrs</span>
+              <span className="chip-detail">({formatDuration(totalOnSeconds)})</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="history-kpi-chip kpi-off">
+          <div className="chip-icon-box off">
+            <Square size={16} />
+          </div>
+          <div className="chip-text-group">
+            <span className="chip-label">Total Motor OFF Time</span>
+            <span className="chip-value">
+              {totalOffHours} <span className="unit">hrs</span>
+              <span className="chip-detail">({formatDuration(totalOffSeconds)})</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="history-kpi-chip kpi-cycles">
+          <div className="chip-icon-box cycles">
+            <Clock size={16} />
+          </div>
+          <div className="chip-text-group">
+            <span className="chip-label">Total Operations</span>
+            <span className="chip-value">
+              {totalOperations} <span className="unit">cycles</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="history-kpi-chip kpi-device">
+          <div className="chip-icon-box dev">
+            <Cpu size={16} />
+          </div>
+          <div className="chip-text-group">
+            <span className="chip-label">Target Hardware</span>
+            <span className="chip-value code-font">
+              {selectedDeviceId || 'ALL DEVICES'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Filters & Search Bar */}
+      <div className="history-filter-bar">
+        <div className="history-search-input">
+          <Search size={15} className="search-icon" />
+          <input
+            type="text"
+            placeholder="Search by device, status, or date..."
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+          />
+        </div>
+
+        <div className="history-status-filters">
+          <span className="filter-label"><Filter size={13} /> Filter:</span>
+          <button
+            type="button"
+            className={`status-filter-pill ${statusFilter === 'ALL' ? 'active' : ''}`}
+            onClick={() => { setStatusFilter('ALL'); setCurrentPage(1); }}
+          >
+            All States
+          </button>
+        </div>
+      </div>
+
+      {/* 4. Main Data Table */}
+      {loading ? (
+        <div className="history-table-empty">
+          <Loader2 size={32} className="animate-spin text-blue" />
+          <p>Loading motor operation history and telemetry logs...</p>
+        </div>
+      ) : activeRecords.length === 0 ? (
+        <div className="history-table-empty">
+          <Clock size={40} className="empty-icon" />
+          <h4>No Operational History Found</h4>
+          <p>No motor events or telemetry match the current filter criteria for {selectedDeviceId || 'this device'}.</p>
+        </div>
+      ) : (
+        <div className="history-table-scroll-wrap">
+          {activeTab === 'motor' ? (
+            /* MOTOR ON / OFF HOURS TABLE */
+            <table className="dash-history-data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '50px' }}>#</th>
+                  <th>Date & Time</th>
+                  <th>Device</th>
+                  <th>Motor Status</th>
+                  <th>Hours ON</th>
+                  <th>Hours OFF</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedRecords.map((item, idx) => {
+                  const durationSec = getItemDuration(item);
+                  const isOn = item.motorStatus === 'ON';
+                  const isOngoing = !item.endTime;
+                  const rowNumber = (currentPage - 1) * pageSize + idx + 1;
+
+                  return (
+                    <tr key={item._id || idx} className={isOn ? 'row-motor-on' : 'row-motor-off'}>
+                      <td className="col-idx">{rowNumber}</td>
+                      <td className="col-timestamp">
+                        <span className="date-time-main">
+                          {new Date(item.startTime || item.timestamp).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                        <span className="date-time-sub">
+                          {new Date(item.startTime || item.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
+                        </span>
+                      </td>
+                      <td className="col-device">
+                        <span className="device-tag-code">{item.deviceId || selectedDeviceId || 'WT-DEV-001'}</span>
+                      </td>
+                      <td className="col-status">
+                        <span className={`motor-status-chip ${isOn ? 'on' : 'off'}`}>
+                          <span className="status-dot"></span>
+                          <span>{isOn ? 'MOTOR ON' : 'MOTOR OFF'}</span>
+                        </span>
+                      </td>
+                      <td className="col-hours-on">
+                        {isOn ? (
+                          <div className="hours-val-box on">
+                            <span className="hours-primary">{formatDecimalHours(durationSec)}</span>
+                            <span className="hours-secondary">({formatDuration(durationSec)})</span>
+                            {isOngoing && <span className="active-tag">Active</span>}
+                          </div>
+                        ) : (
+                          <span className="empty-dash">-</span>
+                        )}
+                      </td>
+                      <td className="col-hours-off">
+                        {!isOn ? (
+                          <div className="hours-val-box off">
+                            <span className="hours-primary">{formatDecimalHours(durationSec)}</span>
+                            <span className="hours-secondary">({formatDuration(durationSec)})</span>
+                            {isOngoing && <span className="active-tag idle">Idle</span>}
+                          </div>
+                        ) : (
+                          <span className="empty-dash">-</span>
+                        )}
+                      </td>
+                      <td className="col-duration">
+                        <span className="duration-pill">
+                          {formatDuration(durationSec)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            /* ALL TELEMETRY RECORDS TABLE */
+            <table className="dash-history-data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '50px' }}>#</th>
+                  <th>Timestamp</th>
+                  <th>Device ID</th>
+                  <th>Water Level</th>
+                  <th>Motor Status</th>
+                  <th>Voltage</th>
+                  <th>Current</th>
+                  <th>Active Power</th>
+                  <th>Energy Usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedRecords.map((t, idx) => {
+                  const isOn = t.motorStatus === 'ON';
+                  const rowNumber = (currentPage - 1) * pageSize + idx + 1;
+                  return (
+                    <tr key={t._id || idx}>
+                      <td className="col-idx">{rowNumber}</td>
+                      <td className="col-timestamp">
+                        <span className="date-time-main">
+                          {new Date(t.timestamp).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </span>
+                        <span className="date-time-sub">
+                          {new Date(t.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
+                        </span>
+                      </td>
+                      <td className="col-device">
+                        <span className="device-tag-code">{t.deviceId || selectedDeviceId || 'WT-DEV-001'}</span>
+                      </td>
+                      <td className="col-water">
+                        <div className="water-level-cell">
+                          <span className="water-pct-bold">{t.waterLevel || 0}%</span>
+                          <span className="water-liters-muted">({t.waterConsumption || 0} L)</span>
+                        </div>
+                      </td>
+                      <td className="col-status">
+                        <span className={`motor-status-chip ${isOn ? 'on' : 'off'}`}>
+                          <span className="status-dot"></span>
+                          <span>{t.motorStatus || 'OFF'}</span>
+                        </span>
+                      </td>
+                      <td>{t.voltage || 0} V</td>
+                      <td>{t.current || 0} A</td>
+                      <td className="font-semibold">{t.power || 0} W</td>
+                      <td>
+                        <span className="energy-kwh-pill">{t.energyConsumption || 0} kWh</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* 5. Comprehensive Pagination Footer */}
+      <div className="history-table-pagination">
+        <div className="pagination-left-wrap">
+          <span className="page-summary-text">
+            Showing <strong>{activeRecords.length > 0 ? startIndex + 1 : 0}</strong> to <strong>{endIndex}</strong> of <strong>{activeRecords.length}</strong> records
+          </span>
+
+          <div className="page-size-picker-wrap">
+            <span className="page-size-label">Rows:</span>
+            <select
+              className="page-size-select"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="pagination-btn-group">
+          {/* First Page Button */}
+          <button
+            type="button"
+            className="page-nav-btn page-edge-btn"
+            onClick={() => setCurrentPage(1)}
+            disabled={currentPage === 1}
+            title="First Page"
+          >
+            <ChevronsLeft size={15} />
+          </button>
+
+          {/* Previous Page Button */}
+          <button
+            type="button"
+            className="page-nav-btn"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            <ChevronLeft size={15} />
+            <span>Prev</span>
+          </button>
+
+          {/* Numbered Page Buttons */}
+          <div className="page-numbers-list">
+            {getPageNumbers().map((pageNum, idx) =>
+              pageNum === '...' ? (
+                <span key={`dots-${idx}`} className="page-dots">...</span>
+              ) : (
+                <button
+                  key={`page-${pageNum}`}
+                  type="button"
+                  className={`page-num-btn ${currentPage === pageNum ? 'active' : ''}`}
+                  onClick={() => setCurrentPage(pageNum)}
+                >
+                  {pageNum}
+                </button>
+              )
+            )}
+          </div>
+
+          {/* Next Page Button */}
+          <button
+            type="button"
+            className="page-nav-btn"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages || totalPages === 0}
+          >
+            <span>Next</span>
+            <ChevronRight size={15} />
+          </button>
+
+          {/* Last Page Button */}
+          <button
+            type="button"
+            className="page-nav-btn page-edge-btn"
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={currentPage === totalPages || totalPages === 0}
+            title="Last Page"
+          >
+            <ChevronsRight size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ==========================================================================
    MAIN DASHBOARD COMPONENT (frontend/src/pages/Dashboard.jsx)
    ========================================================================== */
 const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
@@ -755,6 +1360,42 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
       loadMotorConsumption(selectedDeviceId);
     }
   }, [selectedDeviceId, refreshDashboard, loadPowerHistory, loadMotorConsumption, chartRange]);
+
+  const handleMotorStateChanged = useCallback((newStatus) => {
+    if (newStatus) {
+      setDashboardData((prev) => {
+        const base = prev || {
+          powerMetrics: { voltage: 230, current: newStatus === 'ON' ? 6.5 : 0, power: newStatus === 'ON' ? 1380 : 0, powerFactor: 0.92 },
+          waterTank: { levelPercentage: 65, capacityLiters: 1000, currentLiters: 650 },
+          motor: { motorStatus: newStatus },
+          energy: { totalKwh: 0.45, todayKwh: 0.45, monthlyKwh: 0.45 },
+        };
+        return {
+          ...base,
+          hasData: true,
+          powerMetrics: {
+            ...base.powerMetrics,
+            voltage: newStatus === 'ON' ? 230.5 : 231.8,
+            current: newStatus === 'ON' ? 6.5 : 0.0,
+            power: newStatus === 'ON' ? 1380 : 0,
+            powerFactor: base.powerMetrics?.powerFactor || 0.92,
+          },
+          motor: {
+            ...base.motor,
+            motorStatus: newStatus,
+            lastOnTime: newStatus === 'ON' ? new Date().toISOString() : base.motor?.lastOnTime,
+            lastOffTime: newStatus === 'OFF' ? new Date().toISOString() : base.motor?.lastOffTime,
+          },
+        };
+      });
+    }
+    fetchDevices();
+    if (selectedDeviceId) {
+      refreshDashboard(selectedDeviceId);
+      loadMotorConsumption(selectedDeviceId);
+      loadPowerHistory(chartRange, selectedDeviceId);
+    }
+  }, [selectedDeviceId, refreshDashboard, loadMotorConsumption, loadPowerHistory, chartRange, fetchDevices]);
 
   const handleSelectDevice = (devId) => {
     if (!devId) return;
@@ -1161,11 +1802,7 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                 waterLevel={waterTank.levelPercentage}
                 selectedDeviceId={selectedDeviceId}
                 hasData={hasData}
-                onMotorStateChanged={() => {
-                  refreshDashboard(selectedDeviceId);
-                  loadMotorConsumption(selectedDeviceId);
-                  loadPowerHistory(chartRange, selectedDeviceId);
-                }}
+                onMotorStateChanged={handleMotorStateChanged}
               />
               <PowerMetricsCard metrics={powerMetrics} hasData={hasData} />
             </div>
@@ -1197,11 +1834,7 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                   motorData={motorData}
                   selectedDeviceId={selectedDeviceId}
                   hasData={hasData}
-                  onMotorStateChanged={() => {
-                    refreshDashboard(selectedDeviceId);
-                    loadMotorConsumption(selectedDeviceId);
-                    loadPowerHistory(chartRange, selectedDeviceId);
-                  }}
+                  onMotorStateChanged={handleMotorStateChanged}
                 />
 
                 <TotalPowerCard
@@ -1213,6 +1846,12 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                 <MotorHistoryChart historyData={motorHistory} />
               </div>
             </div>
+
+            {/* 9. Operational History & Motor Run Hours Table */}
+            <DashboardHistoryTable
+              selectedDeviceId={selectedDeviceId}
+              hasData={hasData}
+            />
           </div>
         )}
       </main>

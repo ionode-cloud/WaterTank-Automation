@@ -15,8 +15,14 @@ const motorRoutes = require('./routes/motorRoutes');
 const systemRoutes = require('./routes/systemRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
+const modelRoutes = require('./routes/modelRoutes');
+const faultRoutes = require('./routes/faultRoutes');
+const dataRoutes = require('./routes/dataRoutes');
 const authController = require('./controllers/authController');
 const sensorController = require('./controllers/sensorController');
+const { optionalProtect } = require('./middleware/auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -79,63 +85,158 @@ app.use((req, res, next) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/models', modelRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/sensors', sensorRoutes);
 app.use('/api/motor', motorRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/device', deviceRoutes);
 app.use('/api/devices', deviceRoutes);
+app.use('/api/data', dataRoutes);
+app.use('/api/faults', faultRoutes);
+
+// Live 1-second Acknowledgement endpoint
+app.get('/api/iot/ack', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    status: 'Active',
+    acknowledgedAt: new Date().toISOString(),
+    serverTime: Date.now(),
+  });
+});
 
 // Dedicated endpoints required by Section 6:
-app.get('/api/water-level/history', sensorController.getWaterLevelHistory);
-app.get('/api/power/history', sensorController.getPowerHistory);
+app.get('/api/water-level/history', optionalProtect, sensorController.getWaterLevelHistory);
+app.get('/api/power/history', optionalProtect, sensorController.getPowerHistory);
 
 // Hardware IoT bridge endpoints (Ready for physical ESP32 / Arduino / PLC)
 app.post('/api/iot/telemetry', async (req, res) => {
   try {
     const {
+      deviceId,
       voltage,
       current,
+      vol1,
+      vol2,
+      vol3,
+      cu1,
+      cu2,
+      cu3,
+      power,
       powerFactor,
+      frequency,
       waterLevel,
+      waterLevelStatus,
+      sumpTank,
+      overheadTank,
       tankCapacity,
       tankcapacity,
       waterConsumption,
       waterconsuption,
       motorStatus,
+      status,
+      deviceStatus,
+      faultDescription,
     } = req.body;
 
-    const v = Number(voltage) || 230;
-    const c = Number(current) || 0;
-    const pf = Number(powerFactor) || 0.92;
-    const p = Math.round(v * c * pf);
+    const devId = deviceId ? String(deviceId).trim().toUpperCase() : 'WT-DEV-001';
+
+    const v = voltage !== undefined ? Number(voltage) : null;
+    const c = current !== undefined ? Number(current) : null;
+    const v1 = vol1 !== undefined ? Number(vol1) : null;
+    const v2 = vol2 !== undefined ? Number(vol2) : null;
+    const v3 = vol3 !== undefined ? Number(vol3) : null;
+    const c1 = cu1 !== undefined ? Number(cu1) : null;
+    const c2 = cu2 !== undefined ? Number(cu2) : null;
+    const c3 = cu3 !== undefined ? Number(cu3) : null;
+
+    const pf = powerFactor !== undefined ? Number(powerFactor) : null;
+    const freq = frequency !== undefined ? Number(frequency) : null;
+
+    let p = power !== undefined ? Number(power) : null;
+    if (p === null) {
+      if (v !== null && c !== null) {
+        p = Math.round(v * c * (pf || 0.92));
+      } else if (v1 !== null && c1 !== null) {
+        p = Math.round((v1 * c1 + (v2 || v1) * (c2 || c1) + (v3 || v1) * (c3 || c1)) * (pf || 0.92));
+      }
+    }
 
     const cap = tankCapacity !== undefined 
       ? Number(tankCapacity) 
-      : (tankcapacity !== undefined ? Number(tankcapacity) : 1000);
+      : (tankcapacity !== undefined ? Number(tankcapacity) : null);
 
     const con = waterConsumption !== undefined 
       ? Number(waterConsumption) 
       : (waterconsuption !== undefined 
           ? Number(waterconsuption) 
-          : (waterLevel !== undefined ? Math.round((Number(waterLevel) / 100) * cap) : 0));
+          : (waterLevel !== undefined && cap ? Math.round((Number(waterLevel) / 100) * cap) : null));
 
-    const wl = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : 0;
-    const ms = motorStatus === 'ON' ? 'ON' : 'OFF';
+    let wl = waterLevel !== undefined ? Number(waterLevel) : null;
+    if (wl === null && cap && con !== null && cap > 0) {
+      wl = Math.min(100, Math.max(0, Math.round((con / cap) * 100)));
+    }
+
+    let wlStatus = waterLevelStatus || null;
+    if (!wlStatus && wl !== null) {
+      wlStatus = wl < 25 ? 'Low' : wl > 75 ? 'High' : 'Medium';
+    }
+
+    const ms = motorStatus ? (String(motorStatus).toUpperCase() === 'ON' ? 'ON' : 'OFF') : 'OFF';
+    const isFault = (status && status.toLowerCase() === 'fault') || (deviceStatus && deviceStatus.toLowerCase() === 'fault') || Boolean(faultDescription);
+    const resolvedStatus = isFault ? 'Fault' : 'Active';
 
     iotService.updateRuntimeState({
+      deviceId: devId,
       voltage: v,
       current: c,
+      vol1: v1,
+      vol2: v2,
+      vol3: v3,
+      cu1: c1,
+      cu2: c2,
+      cu3: c3,
       power: p,
       powerFactor: pf,
+      frequency: freq,
       tankCapacity: cap,
       waterConsumption: con,
       waterLevel: wl,
+      waterLevelStatus: wlStatus,
+      sumpTank: sumpTank || null,
+      overheadTank: overheadTank || null,
       motorStatus: ms,
+      status: resolvedStatus,
+      deviceStatus: resolvedStatus,
       isHardwareConnected: true,
     });
 
-    return res.status(200).json({ success: true, message: 'Hardware telemetry synced', waterLevel: wl });
+    if (isFault) {
+      const FaultLog = require('./models/FaultLog');
+      const now = new Date();
+      const fl = new FaultLog({
+        deviceId: devId,
+        faultDescription: faultDescription || 'Hardware reported fault condition',
+        faultStatus: 'Active',
+        timestamp: now,
+      });
+      await fl.save();
+      const io = iotService.getSocketIO();
+      if (io) {
+        io.emit('new_fault', fl);
+        io.emit('device_status_update', { deviceId: devId, status: 'Fault', deviceStatus: 'Fault' });
+      }
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Hardware telemetry synced', 
+      waterLevel: wl,
+      waterLevelStatus: wlStatus,
+      deviceStatus: resolvedStatus,
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

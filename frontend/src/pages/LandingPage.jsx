@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Droplets,
   Zap,
@@ -16,9 +16,33 @@ import {
   Gauge,
   Radio,
   Settings,
+  ChevronDown,
+  User,
+  LogOut,
+  LayoutDashboard,
+  Layers,
+  History,
+  Users,
+  Smartphone,
 } from 'lucide-react';
 
-const LandingPage = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
+const LandingPage = ({ onNavigate, onOpenAuth, currentUser, onLogout, onOpenProfile }) => {
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setUserDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const isAdmin = currentUser && String(currentUser.role).toUpperCase() === 'ADMIN';
+
   const handleLaunchConsole = () => {
     if (currentUser) {
       onNavigate('dashboard');
@@ -48,23 +72,171 @@ const LandingPage = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
           {/* Right Action Button */}
           <div className="aquabrim-nav-actions">
             {currentUser ? (
-              <div className="nav-logged-wrap">
+              <div className="navbar-user-dropdown-wrap" ref={dropdownRef}>
                 <button
                   type="button"
-                  className="aquabrim-btn-outline"
-                  onClick={() => onNavigate('dashboard')}
+                  className="navbar-user-chip"
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                  aria-label="User account menu"
                 >
-                  <Gauge size={15} />
-                  <span>Dashboard Console</span>
+                  <div className="user-chip-avatar">
+                    {currentUser.picture ? (
+                      <img
+                        src={currentUser.picture}
+                        alt={currentUser.name}
+                        style={{ width: '100%', height: '100%', borderRadius: '50%' }}
+                      />
+                    ) : (
+                      currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'
+                    )}
+                  </div>
+                  <div className="user-info-text">
+                    <span className="user-name">{currentUser.name || 'User'}</span>
+                    {isAdmin && <span className="user-role-badge">Admin</span>}
+                  </div>
+                  <ChevronDown size={14} className="dropdown-caret" />
                 </button>
-                <button
-                  type="button"
-                  className="aquabrim-btn-logout"
-                  onClick={onLogout}
-                  title="Sign Out"
-                >
-                  Sign Out
-                </button>
+
+                {userDropdownOpen && (
+                  <div className="navbar-user-menu animate-pop-in">
+                    {/* User Header */}
+                    <div className="user-menu-header">
+                      <strong>{currentUser.name}</strong>
+                      <span className="user-menu-email">{currentUser.email}</span>
+                      <span className={`user-menu-role-tag ${isAdmin ? 'admin-tag' : 'user-tag'}`}>
+                        {isAdmin ? 'Administrator' : 'Standard User'}
+                      </span>
+                    </div>
+
+                    <div className="user-menu-divider"></div>
+                    <div className="user-menu-section-label">NAVIGATION</div>
+
+                    {/* All Tabs Navigation */}
+                    {/* User & Admin Navigation */}
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        onNavigate('dashboard');
+                      }}
+                    >
+                      <LayoutDashboard size={15} />
+                      <span>Dashboard</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        onNavigate('devices');
+                      }}
+                    >
+                      <Cpu size={15} />
+                      <span>Devices</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        onNavigate('history');
+                      }}
+                    >
+                      <History size={15} />
+                      <span>History</span>
+                    </button>
+
+                    {/* Admin Only: Dashboard Console & Management */}
+                    {isAdmin && (
+                      <>
+                        <div className="user-menu-divider"></div>
+                        <div className="user-menu-section-label">ADMIN CONSOLE</div>
+
+                        <button
+                          type="button"
+                          className="user-menu-item admin-menu-item"
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            onNavigate('admin');
+                          }}
+                        >
+                          <ShieldCheck size={15} />
+                          <span>Dashboard Console</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="user-menu-item"
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            onNavigate('models');
+                          }}
+                        >
+                          <Layers size={15} />
+                          <span>Models</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="user-menu-item"
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            onNavigate('registered-users');
+                          }}
+                        >
+                          <Users size={15} />
+                          <span>Registered Users</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="user-menu-item"
+                          onClick={() => {
+                            setUserDropdownOpen(false);
+                            onNavigate('user-devices');
+                          }}
+                        >
+                          <Smartphone size={15} />
+                          <span>User Registered Devices</span>
+                        </button>
+                      </>
+                    )}
+
+                    {/* Separate Profile */}
+                    <div className="user-menu-divider"></div>
+                    <div className="user-menu-section-label">ACCOUNT</div>
+
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('profile');
+                      }}
+                    >
+                      <User size={15} />
+                      <span>My Profile</span>
+                    </button>
+
+                    <div className="user-menu-divider"></div>
+
+                    {/* Sign Out */}
+                    <button
+                      type="button"
+                      className="user-menu-item text-danger"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onLogout) onLogout();
+                      }}
+                    >
+                      <LogOut size={15} />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <button

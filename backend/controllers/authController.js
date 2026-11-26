@@ -27,7 +27,7 @@ const generateToken = (user) => {
  */
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role = 'admin', phone } = req.body;
+    const { name, email, password, phone, mobileNumber, location } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -53,12 +53,19 @@ exports.register = async (req, res) => {
       });
     }
 
+    const baseUsername = cleanEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const finalPhone = phone || mobileNumber ? String(phone || mobileNumber).trim() : '';
+
     const user = new User({
       name: String(name).trim(),
+      username: `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`,
       email: cleanEmail,
       password,
-      role: ['admin', 'operator', 'viewer'].includes(role) ? role : 'admin',
-      phone: phone ? String(phone).trim() : '',
+      role: 'USER',
+      phone: finalPhone,
+      mobileNumber: finalPhone,
+      location: location ? String(location).trim() : '',
+      isActive: true,
       lastLogin: new Date(),
     });
 
@@ -68,14 +75,16 @@ exports.register = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'User registered successfully',
+      message: 'Account registered successfully',
       token,
       user: {
         id: user._id,
         name: user.name,
+        username: user.username,
         email: user.email,
         role: user.role,
         phone: user.phone,
+        location: user.location,
         createdAt: user.createdAt,
       },
     });
@@ -85,6 +94,101 @@ exports.register = async (req, res) => {
       success: false,
       message: 'Failed to register account',
       error: error.message,
+    });
+  }
+};
+
+/**
+ * POST /api/auth/google
+ * Authenticate or register with Google OAuth / ID Token
+ */
+exports.googleLogin = async (req, res) => {
+  try {
+    const { token, credential, email, name, picture, sub } = req.body;
+
+    let userEmail = email;
+    let userName = name;
+    let userGoogleId = sub;
+
+    // Decode Google JWT credential if supplied directly
+    if (credential && !userEmail) {
+      try {
+        const parts = credential.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+          userEmail = payload.email;
+          userName = payload.name;
+          userGoogleId = payload.sub;
+        }
+      } catch (decodeErr) {
+        console.error('[Google Credential Decode Error]', decodeErr);
+      }
+    }
+
+    if (!userEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid Google email is required for Google Sign-In',
+      });
+    }
+
+    const cleanEmail = String(userEmail).trim().toLowerCase();
+    let user = await User.findOne({ email: cleanEmail });
+
+    if (!user) {
+      const randomPassword = 'G_' + Math.random().toString(36).substring(2, 12) + '!2026';
+      const cleanName = userName ? String(userName).trim() : cleanEmail.split('@')[0];
+      const baseUsername = cleanEmail.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+      user = new User({
+        name: cleanName,
+        username: `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`,
+        email: cleanEmail,
+        password: randomPassword,
+        role: 'USER',
+        googleId: userGoogleId || '',
+        picture: picture || '',
+        isActive: true,
+        lastLogin: new Date(),
+      });
+      await user.save();
+    } else {
+      user.lastLogin = new Date();
+      if (userGoogleId && !user.googleId) user.googleId = userGoogleId;
+      if (picture && !user.picture) user.picture = picture;
+      if (!user.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'This user account has been deactivated. Please contact an administrator.',
+        });
+      }
+      await user.save();
+    }
+
+    const jwtToken = generateToken(user);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Google Sign-In successful',
+      token: jwtToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        picture: user.picture || picture || '',
+        phone: user.phone || user.mobileNumber || '',
+        location: user.location || '',
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('[/api/auth/google error]', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to authenticate with Google',
+      error: err.message,
     });
   }
 };
@@ -164,9 +268,15 @@ exports.login = async (req, res) => {
  */
 exports.getMe = async (req, res) => {
   try {
+    const Device = require('../models/Device');
+    const assignedDevices = await Device.find({ assignedUserId: req.user._id }).select('deviceId name modelNumber location status').lean();
     return res.status(200).json({
       success: true,
-      user: req.user,
+      user: {
+        ...req.user.toObject ? req.user.toObject() : req.user,
+        assignedDevices: assignedDevices || [],
+        assignedDeviceCount: (assignedDevices || []).length,
+      },
     });
   } catch (error) {
     return res.status(500).json({
@@ -178,22 +288,89 @@ exports.getMe = async (req, res) => {
 };
 
 /**
+ * PUT /api/auth/profile
+ * Update logged-in user profile (Name, phone, location)
+ */
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name, phone, mobileNumber, location, password } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User account not found',
+      });
+    }
+
+    if (name) user.name = String(name).trim();
+    if (phone !== undefined) user.phone = String(phone).trim();
+    if (mobileNumber !== undefined) user.mobileNumber = String(mobileNumber).trim();
+    if (location !== undefined) user.location = String(location).trim();
+    if (password && String(password).trim().length >= 6) {
+      user.password = String(password).trim();
+    }
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        phone: user.phone || user.mobileNumber || '',
+        location: user.location || '',
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update profile',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * GET /api/admin/users
- * Retrieve all registered users & administrators (Admin Only)
+ * Retrieve administrator & operator accounts (Admin Only)
+ * Excludes regular standard end users ('user' / 'USER')
  */
 exports.getAllUsers = async (req, res) => {
   try {
     const { search, role } = req.query;
-    const filter = {};
 
-    if (role) {
-      filter.role = role.toLowerCase();
+    const allowedAdminRoles = ['admin', 'ADMIN', 'operator', 'OPERATOR'];
+    const queryConditions = [];
+
+    // 1. Role condition: strictly Administrator and Operator
+    if (role && role !== 'all') {
+      const lower = String(role).trim().toLowerCase();
+      if (lower === 'admin') {
+        queryConditions.push({ role: { $in: ['admin', 'ADMIN'] } });
+      } else if (lower === 'operator') {
+        queryConditions.push({ role: { $in: ['operator', 'OPERATOR'] } });
+      } else {
+        queryConditions.push({ role: { $in: allowedAdminRoles } });
+      }
+    } else {
+      queryConditions.push({ role: { $in: allowedAdminRoles } });
     }
 
-    if (search) {
+    // 2. Search condition
+    if (search && String(search).trim()) {
       const regex = new RegExp(String(search).trim(), 'i');
-      filter.$or = [{ name: regex }, { email: regex }, { phone: regex }];
+      queryConditions.push({
+        $or: [{ name: regex }, { email: regex }, { phone: regex }, { mobileNumber: regex }],
+      });
     }
+
+    const filter = queryConditions.length > 1 ? { $and: queryConditions } : queryConditions[0];
 
     const users = await User.find(filter)
       .select('-password')

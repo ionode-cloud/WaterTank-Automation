@@ -103,7 +103,25 @@ exports.getPowerHistory = async (req, res) => {
     }
 
     const filter = { timestamp: { $gte: startDate } };
-    if (req.query.deviceId) {
+    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+
+    if (!isUserAdmin && req.user) {
+      const Device = require('../models/Device');
+      const userDevices = await Device.find({
+        assignedUserId: req.user._id,
+        $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+      }).distinct('deviceId');
+
+      if (req.query.deviceId) {
+        const reqDevId = String(req.query.deviceId).trim().toUpperCase();
+        if (!userDevices.includes(reqDevId)) {
+          return res.status(200).json({ success: true, range, count: 0, data: [] });
+        }
+        filter.deviceId = reqDevId;
+      } else {
+        filter.deviceId = { $in: userDevices };
+      }
+    } else if (req.query.deviceId) {
       filter.deviceId = req.query.deviceId.toUpperCase();
     }
 

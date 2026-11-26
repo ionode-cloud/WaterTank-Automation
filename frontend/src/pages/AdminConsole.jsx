@@ -10,6 +10,7 @@ import {
   Key,
   Mail,
   User as UserIcon,
+  UserCheck,
   Phone,
   CheckCircle2,
   AlertCircle,
@@ -22,6 +23,8 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 import Sidebar from '../components/Sidebar';
@@ -33,36 +36,75 @@ import {
   deleteAdminUser,
 } from '../services/api';
 
-const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
+const AdminConsole = ({
+  onNavigate,
+  onOpenAuth,
+  currentUser,
+  onLogout,
+  onOpenProfile,
+  currentPage = 'admin',
+}) => {
+  // Shared Alert & Loading State
+  const [alert, setAlert] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Alert State
-  const [alert, setAlert] = useState(null); // { type: 'success' | 'error', message: '' }
+  // Admin Credentials State
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(true);
+  const [adminSearchTerm, setAdminSearchTerm] = useState('');
+  const [adminRoleFilter, setAdminRoleFilter] = useState('all');
+  const [adminPage, setAdminPage] = useState(1);
+  const adminPageSize = 10;
+  const [visiblePasswords, setVisiblePasswords] = useState({});
 
-  // Modal States
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
+  // Modals State
+  const [showAddAdminModal, setShowAddAdminModal] = useState(false);
+  const [showEditAdminModal, setShowEditAdminModal] = useState(false);
+  const [showDeleteAdminModal, setShowDeleteAdminModal] = useState(false);
+  const [selectedAdminUser, setSelectedAdminUser] = useState(null);
+  const [adminModalLoading, setAdminModalLoading] = useState(false);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
 
-  // Form Data for Add/Edit
-  const [formData, setFormData] = useState({
+  const [adminFormData, setAdminFormData] = useState({
     name: '',
     email: '',
     password: '',
     role: 'admin',
     phone: '',
-    isActive: true,
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [visiblePasswords, setVisiblePasswords] = useState({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+
+  // JWT Secret Display State
+  const [isRevealedJwt, setIsRevealedJwt] = useState(false);
+  const [copiedJwt, setCopiedJwt] = useState(false);
+  const jwtSecretMasked = 'watertank_jwt_super_secret_key_2026';
+
+  // Fetch Admin Credentials
+  const fetchAdminCredentialsList = useCallback(async () => {
+    setLoadingAdmins(true);
+    try {
+      const res = await getAdminUsers({
+        search: adminSearchTerm || undefined,
+        role: adminRoleFilter !== 'all' ? adminRoleFilter : undefined,
+      });
+      if (res.data?.success) {
+        setAdminUsers(res.data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load admin credentials:', err);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  }, [adminSearchTerm, adminRoleFilter]);
+
+  useEffect(() => {
+    fetchAdminCredentialsList();
+  }, [fetchAdminCredentialsList]);
+
+  const handleGlobalRefresh = async () => {
+    setRefreshing(true);
+    await fetchAdminCredentialsList();
+    setRefreshing(false);
+  };
 
   const togglePasswordVisibility = (userId) => {
     setVisiblePasswords((prev) => ({
@@ -71,181 +113,186 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
     }));
   };
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await getAdminUsers({
-        search: searchTerm || undefined,
-        role: roleFilter !== 'all' ? roleFilter : undefined,
-      });
-      if (res.data?.success) {
-        setUsers(res.data.data);
-      }
-    } catch (err) {
-      console.error('Failed to load admin credentials:', err.message);
-      if (err.response?.status === 401 || err.response?.status === 403) {
-        setAlert({
-          type: 'error',
-          message: 'Authentication required. Please sign in as an Administrator to manage credentials.',
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [searchTerm, roleFilter]);
-
-  useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchUsers();
-    setTimeout(() => setRefreshing(false), 500);
-  };
-
-  const openAddModal = () => {
-    setFormData({
+  // Admin Modal Handlers
+  const openAddAdminModal = () => {
+    setAdminFormData({
       name: '',
       email: '',
       password: '',
       role: 'admin',
       phone: '',
-      isActive: true,
     });
-    setShowPassword(false);
-    setShowAddModal(true);
+    setShowAdminPassword(false);
+    setShowAddAdminModal(true);
   };
 
-  const openEditModal = (user) => {
-    setSelectedUser(user);
-    setFormData({
-      name: user.name || '',
-      email: user.email || '',
-      password: user.displayPassword || '',
-      role: user.role || 'admin',
-      phone: user.phone || '',
-      isActive: user.isActive !== false,
+  const handleCreateAdminSubmit = async (e) => {
+    e.preventDefault();
+    setAdminModalLoading(true);
+    try {
+      const res = await createAdminUser(adminFormData);
+      if (res.data?.success) {
+        setAlert({
+          type: 'success',
+          message: `Admin credential for ${adminFormData.email} created successfully.`,
+        });
+        setShowAddAdminModal(false);
+        fetchAdminCredentialsList();
+      }
+    } catch (err) {
+      setAlert({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to create admin credential',
+      });
+    } finally {
+      setAdminModalLoading(false);
+    }
+  };
+
+  const openEditAdminModal = (admin) => {
+    setSelectedAdminUser(admin);
+    setAdminFormData({
+      name: admin.name || '',
+      email: admin.email || '',
+      password: '',
+      role: admin.role || 'admin',
+      phone: admin.phone || admin.mobileNumber || '',
     });
-    setShowPassword(false);
-    setShowEditModal(true);
+    setShowAdminPassword(false);
+    setShowEditAdminModal(true);
   };
 
-  const openDeleteModal = (user) => {
-    setSelectedUser(user);
-    setShowDeleteModal(true);
-  };
-
-  const handleAddSubmit = async (e) => {
+  const handleUpdateAdminSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim() || !formData.password) {
-      setAlert({ type: 'error', message: 'Name, email, and password are required' });
-      return;
-    }
-    if (formData.password.length < 6) {
-      setAlert({ type: 'error', message: 'Password must be at least 6 characters' });
-      return;
-    }
-
+    if (!selectedAdminUser) return;
+    setAdminModalLoading(true);
     try {
-      setModalLoading(true);
-      const res = await createAdminUser(formData);
+      const payload = { ...adminFormData };
+      if (!payload.password) delete payload.password;
+
+      const res = await updateAdminUser(selectedAdminUser._id || selectedAdminUser.id, payload);
       if (res.data?.success) {
-        setAlert({ type: 'success', message: `Credential '${formData.name}' created successfully` });
-        setShowAddModal(false);
-        fetchUsers();
+        setAlert({
+          type: 'success',
+          message: `Admin credential for ${adminFormData.email} updated successfully.`,
+        });
+        setShowEditAdminModal(false);
+        fetchAdminCredentialsList();
       }
     } catch (err) {
-      setAlert({ type: 'error', message: err.response?.data?.message || err.message || 'Failed to create user' });
+      setAlert({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to update admin credential',
+      });
     } finally {
-      setModalLoading(false);
+      setAdminModalLoading(false);
     }
   };
 
-  const handleEditSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedUser) return;
+  const openDeleteAdminModal = (admin) => {
+    setSelectedAdminUser(admin);
+    setShowDeleteAdminModal(true);
+  };
 
+  const handleDeleteAdminConfirm = async () => {
+    if (!selectedAdminUser) return;
+    setAdminModalLoading(true);
     try {
-      setModalLoading(true);
-      const payload = {
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        role: formData.role,
-        phone: formData.phone.trim(),
-        isActive: formData.isActive,
-      };
-      if (formData.password && formData.password.trim().length >= 6) {
-        payload.password = formData.password.trim();
-      }
-
-      const res = await updateAdminUser(selectedUser._id, payload);
+      const res = await deleteAdminUser(selectedAdminUser._id || selectedAdminUser.id);
       if (res.data?.success) {
-        setAlert({ type: 'success', message: `Credential '${formData.name}' updated successfully` });
-        setShowEditModal(false);
-        fetchUsers();
+        setAlert({
+          type: 'success',
+          message: `Admin credential for ${selectedAdminUser.email} deleted successfully.`,
+        });
+        setShowDeleteAdminModal(false);
+        fetchAdminCredentialsList();
       }
     } catch (err) {
-      setAlert({ type: 'error', message: err.response?.data?.message || err.message || 'Failed to update user' });
+      setAlert({
+        type: 'error',
+        message: err.response?.data?.message || 'Failed to delete admin credential',
+      });
     } finally {
-      setModalLoading(false);
+      setAdminModalLoading(false);
     }
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!selectedUser) return;
-    try {
-      setModalLoading(true);
-      const res = await deleteAdminUser(selectedUser._id);
-      if (res.data?.success) {
-        setAlert({ type: 'success', message: res.data.message || 'Credential deleted successfully' });
-        setShowDeleteModal(false);
-        fetchUsers();
-      }
-    } catch (err) {
-      setAlert({ type: 'error', message: err.response?.data?.message || err.message || 'Failed to delete user' });
-    } finally {
-      setModalLoading(false);
-    }
+  const handleCopyJwt = () => {
+    navigator.clipboard.writeText(jwtSecretMasked);
+    setCopiedJwt(true);
+    setTimeout(() => setCopiedJwt(false), 2000);
   };
 
-  // Stats calculation
-  const totalAdmins = users.filter((u) => u.role === 'admin').length;
-  const totalOperators = users.filter((u) => u.role === 'operator').length;
+  // Only allow Administrator and Operator roles; strictly exclude standard users
+  const adminAndOperatorsOnly = adminUsers.filter((u) => {
+    const r = String(u.role || '').toLowerCase();
+    return r === 'admin' || r === 'operator';
+  });
 
-  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = Math.min(startIndex + pageSize, users.length);
-  const paginatedUsers = users.slice(startIndex, endIndex);
+  // Filtered Admin List
+  const filteredAdmins = adminAndOperatorsOnly.filter((u) => {
+    const term = adminSearchTerm.toLowerCase();
+    const matchSearch =
+      !term ||
+      u.name?.toLowerCase().includes(term) ||
+      u.email?.toLowerCase().includes(term) ||
+      u.role?.toLowerCase().includes(term) ||
+      u.phone?.toLowerCase().includes(term) ||
+      u.mobileNumber?.toLowerCase().includes(term);
+
+    const r = String(u.role || '').toLowerCase();
+    const matchRole =
+      adminRoleFilter === 'all' ||
+      (adminRoleFilter === 'admin' && r === 'admin') ||
+      (adminRoleFilter === 'operator' && r === 'operator');
+
+    return matchSearch && matchRole;
+  });
+
+  const totalAdminPages = Math.max(1, Math.ceil(filteredAdmins.length / adminPageSize));
+  const adminStartIndex = (adminPage - 1) * adminPageSize;
+  const paginatedAdmins = filteredAdmins.slice(adminStartIndex, adminStartIndex + adminPageSize);
 
   return (
     <div className="app-container">
       {/* Sidebar with Admin Console active */}
-      <Sidebar currentPage="admin" onNavigate={onNavigate} onLogout={onLogout} />
+      <Sidebar currentPage="admin" onNavigate={onNavigate} onLogout={onLogout} currentUser={currentUser} onOpenProfile={onOpenProfile} />
 
       {/* Main Content Area */}
       <div className="main-content">
-        <Navbar currentPage="admin" onNavigate={onNavigate} onRefresh={handleRefresh} />
+        <Navbar
+          currentPage="admin"
+          onNavigate={onNavigate}
+          currentUser={currentUser}
+          onOpenAuth={onOpenAuth}
+          onLogout={onLogout}
+          onRefresh={handleGlobalRefresh}
+          onOpenProfile={onOpenProfile}
+        />
 
         <div className="admin-console-page">
-          {/* Header Banner */}
+          {/* Header Hero Card */}
           <div className="admin-hero-card">
             <div className="admin-hero-content">
               <div className="admin-shield-bubble">
                 <ShieldCheck size={28} className="shield-icon" />
               </div>
               <div>
-                <h2>Admin Security & Credential Console</h2>
+                <h2>Admin Credentials & System Security</h2>
+                <p style={{ margin: '4px 0 0', color: '#64748B', fontSize: '13px' }}>
+                  Manage administrator and operator accounts, authentication credentials, passwords, and JWT session security
+                </p>
               </div>
             </div>
+
             <div className="admin-hero-actions">
               <button
                 type="button"
                 className="btn-create-admin"
-                onClick={openAddModal}
+                onClick={openAddAdminModal}
               >
                 <UserPlus size={16} />
-                <span>Add New Credential</span>
+                <span>Add Admin Credential</span>
               </button>
             </div>
           </div>
@@ -264,160 +311,178 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
           {/* Stats KPI Row */}
           <div className="admin-kpi-grid">
             <div className="admin-kpi-card">
-              <div className="kpi-icon-wrap purple">
-                <Shield size={20} />
+              <div className="kpi-icon-wrap cyan">
+                <ShieldCheck size={20} />
               </div>
               <div className="kpi-info">
-                <span className="kpi-label">Total Credentials</span>
-                <span className="kpi-val">{users.length}</span>
+                <span className="kpi-label">Admin Accounts</span>
+                <span className="kpi-val">{adminAndOperatorsOnly.length}</span>
               </div>
             </div>
 
             <div className="admin-kpi-card">
               <div className="kpi-icon-wrap emerald">
-                <ShieldCheck size={20} />
+                <CheckCircle2 size={20} />
               </div>
               <div className="kpi-info">
-                <span className="kpi-label">Administrators</span>
-                <span className="kpi-val">{totalAdmins}</span>
+                <span className="kpi-label">Active Credentials</span>
+                <span className="kpi-val">
+                  {adminAndOperatorsOnly.filter((u) => u.isActive !== false).length}
+                </span>
               </div>
             </div>
 
             <div className="admin-kpi-card">
-              <div className="kpi-icon-wrap cyan">
-                <UserIcon size={20} />
+              <div className="kpi-icon-wrap purple">
+                <Shield size={20} />
+              </div>
+              <div className="kpi-info">
+                <span className="kpi-label">Administrators</span>
+                <span className="kpi-val">
+                  {adminAndOperatorsOnly.filter((u) => String(u.role || '').toLowerCase() === 'admin').length}
+                </span>
+              </div>
+            </div>
+
+            <div className="admin-kpi-card">
+              <div className="kpi-icon-wrap orange">
+                <UserCheck size={20} />
               </div>
               <div className="kpi-info">
                 <span className="kpi-label">Operators</span>
-                <span className="kpi-val">{totalOperators}</span>
+                <span className="kpi-val">
+                  {adminAndOperatorsOnly.filter((u) => String(u.role || '').toLowerCase() === 'operator').length}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Credentials Table Card */}
+          {/* Admin Credentials Table Card */}
           <div className="dash-card admin-table-card">
-            {/* Table Controls Row */}
+            {/* Search & Filter Toolbar */}
             <div className="admin-table-controls">
               <div className="search-input-wrap">
                 <Search size={16} className="search-icon" />
                 <input
                   type="text"
-                  placeholder="Search by name, email, or phone..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search administrators & operators by name, email, or role..."
+                  value={adminSearchTerm}
+                  onChange={(e) => {
+                    setAdminSearchTerm(e.target.value);
+                    setAdminPage(1);
+                  }}
                 />
               </div>
 
               <div className="role-filter-wrap">
                 <Filter size={15} className="filter-icon" />
                 <select
-                  value={roleFilter}
-                  onChange={(e) => setRoleFilter(e.target.value)}
+                  value={adminRoleFilter}
+                  onChange={(e) => {
+                    setAdminRoleFilter(e.target.value);
+                    setAdminPage(1);
+                  }}
                 >
-                  <option value="all">All Roles</option>
-                  <option value="admin">Administrators</option>
-                  <option value="operator">Operators</option>
+                  <option value="all">All Roles (Admin & Operator)</option>
+                  <option value="admin">Administrator Only</option>
+                  <option value="operator">Operator Only</option>
                 </select>
               </div>
 
               <button
                 type="button"
                 className={`btn-refresh-table ${refreshing ? 'spinning' : ''}`}
-                onClick={handleRefresh}
-                title="Refresh Table"
+                onClick={handleGlobalRefresh}
+                title="Refresh admin credentials"
               >
                 <RefreshCw size={15} />
+                <span>Refresh</span>
               </button>
             </div>
 
-            {/* Table Body */}
-            {loading ? (
+            {loadingAdmins ? (
               <div className="admin-loading-box">
-                <Loader2 size={32} className="animate-spin text-emerald" />
-                <p>Loading authorized credentials from MongoDB...</p>
+                <Loader2 size={32} className="animate-spin text-teal" />
+                <p>Loading administrator credentials...</p>
               </div>
-            ) : users.length === 0 ? (
+            ) : paginatedAdmins.length === 0 ? (
               <div className="admin-empty-box">
-                <ShieldCheck size={40} className="empty-shield" />
-                <h4>No Credentials Found</h4>
-                <p>No user credentials match your current search or role filter.</p>
-                <button type="button" className="btn-primary" onClick={openAddModal}>
-                  <UserPlus size={15} /> Add First Credential
-                </button>
+                <Key size={40} className="empty-shield" />
+                <h4>No Administrator or Operator Credentials Found</h4>
+                <p>Click "Add Admin Credential" above to register a new administrator or operator account.</p>
               </div>
             ) : (
               <div className="admin-table-container">
                 <table className="admin-credentials-table">
                   <thead>
                     <tr>
-                      <th>User / Administrator</th>
+                      <th>Account</th>
                       <th>Email Address</th>
-                      <th>Role Privilege</th>
-                      <th>Status</th>
+                      <th>Contact Phone</th>
+                      <th>System Role</th>
                       <th>Password</th>
-                      <th>Actions</th>
+                      <th>Created Date</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedUsers.map((u) => {
-                      const isCurrentUser = currentUser && (currentUser.id === u._id || currentUser.email === u.email);
+                    {paginatedAdmins.map((u) => {
+                      const isSuper = String(u.role).toLowerCase() === 'admin';
+
                       return (
-                        <tr key={u._id} className={isCurrentUser ? 'current-user-row' : ''}>
-                          {/* Name & Avatar */}
+                        <tr key={u._id || u.id}>
                           <td>
                             <div className="user-profile-cell">
-                              <div className={`user-avatar-bubble ${u.role}`}>
-                                {u.name ? u.name.charAt(0).toUpperCase() : 'U'}
+                              <div className={`user-avatar-bubble ${isSuper ? 'admin' : 'operator'}`}>
+                                {u.name ? u.name.charAt(0).toUpperCase() : 'A'}
                               </div>
                               <div className="user-name-info">
-                                <span className="user-fullname">
-                                  {u.name}
-                                </span>
-                                {u.phone && <span className="user-phone-sub">{u.phone}</span>}
+                                <span className="user-fullname">{u.name || 'Admin User'}</span>
+                                <span className="user-id-code">{u._id || u.id}</span>
                               </div>
                             </div>
                           </td>
 
-                          {/* Email */}
                           <td>
-                            <span className="user-email-text">{u.email}</span>
+                            <div className="email-cell">
+                              <Mail size={13} color="#64748B" />
+                              <span>{u.email}</span>
+                            </div>
                           </td>
 
-                          {/* Role */}
                           <td>
-                            <span className={`role-badge ${u.role}`}>
-                              {u.role === 'admin' ? 'ADMINISTRATOR' : u.role.toUpperCase()}
+                            <div className="email-cell">
+                              <Phone size={13} color="#64748B" />
+                              <span>{u.phone || u.mobileNumber || '—'}</span>
+                            </div>
+                          </td>
+
+                          <td>
+                            <span className={`admin-role-badge ${isSuper ? 'badge-admin' : 'badge-operator'}`}>
+                              <Shield size={12} />
+                              <span>{isSuper ? 'Administrator' : 'Operator'}</span>
                             </span>
                           </td>
 
-                          {/* Status */}
-                          <td>
-                            <span className={`status-pill ${u.isActive !== false ? 'active' : 'inactive'}`}>
-                              <span className="dot"></span>
-                              {u.isActive !== false ? 'Active' : 'Deactivated'}
-                            </span>
-                          </td>
-
-                          {/* Password (Visible on Toggle / Editable) */}
                           <td>
                             <div className="password-display-cell">
                               <span className="password-text-value">
-                                {visiblePasswords[u._id]
+                                {visiblePasswords[u._id || u.id]
                                   ? (u.displayPassword || '••••••••')
                                   : '••••••••'}
                               </span>
                               <button
                                 type="button"
                                 className="btn-toggle-eye"
-                                onClick={() => togglePasswordVisibility(u._id)}
-                                title={visiblePasswords[u._id] ? 'Hide password' : 'Show password'}
+                                onClick={() => togglePasswordVisibility(u._id || u.id)}
+                                title={visiblePasswords[u._id || u.id] ? 'Hide password' : 'Show password'}
                               >
-                                {visiblePasswords[u._id] ? <EyeOff size={15} /> : <Eye size={15} />}
+                                {visiblePasswords[u._id || u.id] ? <EyeOff size={15} /> : <Eye size={15} />}
                               </button>
                               <button
                                 type="button"
                                 className="btn-quick-set-pwd"
-                                onClick={() => openEditModal(u)}
+                                onClick={() => openEditAdminModal(u)}
                                 title="Set / Change Password"
                               >
                                 <Key size={12} />
@@ -426,13 +491,19 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                             </div>
                           </td>
 
-                          {/* Action Buttons */}
+                          <td>
+                            <div className="date-cell">
+                              <Clock size={13} color="#94A3B8" />
+                              <span>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                          </td>
+
                           <td>
                             <div className="admin-actions-cell">
                               <button
                                 type="button"
                                 className="action-btn-edit"
-                                onClick={() => openEditModal(u)}
+                                onClick={() => openEditAdminModal(u)}
                                 title="Edit Credential"
                               >
                                 <Edit2 size={15} />
@@ -441,7 +512,7 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                               <button
                                 type="button"
                                 className="action-btn-delete"
-                                onClick={() => openDeleteModal(u)}
+                                onClick={() => openDeleteAdminModal(u)}
                                 title="Delete Credential"
                               >
                                 <Trash2 size={15} />
@@ -453,77 +524,69 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
 
-                {/* Admin Table Pagination Bar */}
-                <div className="table-pagination-bar" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', padding: '12px 16px', borderTop: '1px solid #E2E8F0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>
-                    Showing {users.length > 0 ? startIndex + 1 : 0} to {endIndex} of {users.length} credentials
-                  </div>
-
-                  <div className="pagination-buttons-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      type="button"
-                      className="page-nav-btn"
-                      disabled={currentPage <= 1 || loading}
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    >
-                      <ChevronLeft size={16} />
-                      <span>Prev</span>
-                    </button>
-
-                    <span className="page-indicator" style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B' }}>
-                      Page {currentPage} of {totalPages}
-                    </span>
-
-                    <button
-                      type="button"
-                      className="page-nav-btn"
-                      disabled={currentPage >= totalPages || loading}
-                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    >
-                      <span>Next</span>
-                      <ChevronRight size={16} />
-                    </button>
-                  </div>
+            {/* Pagination */}
+            {filteredAdmins.length > adminPageSize && (
+              <div className="table-pagination-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderTop: '1px solid #E2E8F0' }}>
+                <span style={{ fontSize: '12px', color: '#64748B' }}>
+                  Showing {adminStartIndex + 1}–{Math.min(adminStartIndex + adminPageSize, filteredAdmins.length)} of {filteredAdmins.length} credentials
+                </span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    disabled={adminPage === 1}
+                    onClick={() => setAdminPage((p) => Math.max(1, p - 1))}
+                    className="page-nav-btn"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <span className="page-indicator">Page {adminPage} of {totalAdminPages}</span>
+                  <button
+                    type="button"
+                    disabled={adminPage >= totalAdminPages}
+                    onClick={() => setAdminPage((p) => Math.min(totalAdminPages, p + 1))}
+                    className="page-nav-btn"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
                 </div>
               </div>
             )}
           </div>
+
         </div>
       </div>
 
-      {/* MODAL 1: ADD NEW CREDENTIAL */}
-      {showAddModal && (
-        <div className="auth-modal-backdrop" onClick={() => setShowAddModal(false)}>
+      {/* MODAL: ADD ADMIN CREDENTIAL */}
+      {showAddAdminModal && (
+        <div className="auth-modal-backdrop" onClick={() => setShowAddAdminModal(false)}>
           <div className="auth-modal-card animate-pop-in" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="auth-close-btn"
-              onClick={() => setShowAddModal(false)}
-            >
-              <X size={18} />
-            </button>
-
             <div className="auth-modal-header">
-              <div className="auth-brand-badge">
-                <UserPlus size={22} className="auth-shield-icon" />
+              <div className="auth-header-title">
+                <UserPlus size={20} className="auth-title-icon" />
+                <h3>Add Administrator Credential</h3>
               </div>
-              <h2 className="auth-modal-title">Add Admin Credential</h2>
-              <p className="auth-modal-subtitle">
-                Create new authorized credentials with full JWT access to telemetry & actuators.
-              </p>
+              <button
+                type="button"
+                className="auth-modal-close"
+                onClick={() => setShowAddAdminModal(false)}
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <form onSubmit={handleAddSubmit} className="auth-form-body">
+            <form onSubmit={handleCreateAdminSubmit} className="auth-form-body">
               <div className="auth-input-group">
-                <label>Full Name</label>
+                <label>Administrator Name</label>
                 <div className="auth-input-wrapper">
                   <UserIcon size={16} className="auth-input-icon" />
                   <input
                     type="text"
-                    placeholder="e.g. System Engineer"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. John Doe"
+                    value={adminFormData.name}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, name: e.target.value })}
                     required
                   />
                 </div>
@@ -535,32 +598,33 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                   <Mail size={16} className="auth-input-icon" />
                   <input
                     type="email"
-                    placeholder="engineer@hydropulse.io"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="admin@watertank.com"
+                    value={adminFormData.email}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, email: e.target.value })}
                     required
                   />
                 </div>
               </div>
 
               <div className="auth-input-group">
-                <label>Password (Min 6 Characters)</label>
+                <label>Access Password</label>
                 <div className="auth-input-wrapper">
                   <Lock size={16} className="auth-input-icon" />
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    type={showAdminPassword ? 'text' : 'password'}
+                    placeholder="Min. 6 characters"
+                    value={adminFormData.password}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, password: e.target.value })}
                     required
+                    minLength={6}
                   />
                   <button
                     type="button"
                     className="auth-eye-btn"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
                     tabIndex={-1}
                   >
-                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showAdminPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
               </div>
@@ -568,25 +632,25 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
               <div className="auth-input-group">
                 <label>Role Authorization</label>
                 <div className="auth-role-selector">
-                  <label className={`role-pill ${formData.role === 'admin' ? 'active' : ''}`}>
+                  <label className={`role-pill ${adminFormData.role === 'admin' ? 'active' : ''}`}>
                     <input
                       type="radio"
-                      name="role"
+                      name="adminRole"
                       value="admin"
-                      checked={formData.role === 'admin'}
-                      onChange={() => setFormData({ ...formData, role: 'admin' })}
+                      checked={adminFormData.role === 'admin'}
+                      onChange={() => setAdminFormData({ ...adminFormData, role: 'admin' })}
                     />
-                    <span>Administrator (Full Access)</span>
+                    <span>Administrator</span>
                   </label>
-                  <label className={`role-pill ${formData.role === 'operator' ? 'active' : ''}`}>
+                  <label className={`role-pill ${adminFormData.role === 'operator' ? 'active' : ''}`}>
                     <input
                       type="radio"
-                      name="role"
+                      name="adminRole"
                       value="operator"
-                      checked={formData.role === 'operator'}
-                      onChange={() => setFormData({ ...formData, role: 'operator' })}
+                      checked={adminFormData.role === 'operator'}
+                      onChange={() => setAdminFormData({ ...adminFormData, role: 'operator' })}
                     />
-                    <span>Operator (Live Monitor & Pump)</span>
+                    <span>Operator</span>
                   </label>
                 </div>
               </div>
@@ -598,52 +662,48 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                   <input
                     type="tel"
                     placeholder="+91 98765 43210"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    value={adminFormData.phone}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, phone: e.target.value })}
                   />
                 </div>
               </div>
 
-              <button type="submit" className="auth-submit-btn" disabled={modalLoading}>
-                {modalLoading ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
-                <span>Save Credential</span>
+              <button type="submit" className="auth-submit-btn" disabled={adminModalLoading}>
+                {adminModalLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                <span>Create Administrator</span>
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: EDIT CREDENTIAL */}
-      {showEditModal && selectedUser && (
-        <div className="auth-modal-backdrop" onClick={() => setShowEditModal(false)}>
+      {/* MODAL: EDIT ADMIN CREDENTIAL */}
+      {showEditAdminModal && selectedAdminUser && (
+        <div className="auth-modal-backdrop" onClick={() => setShowEditAdminModal(false)}>
           <div className="auth-modal-card animate-pop-in" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="auth-close-btn"
-              onClick={() => setShowEditModal(false)}
-            >
-              <X size={18} />
-            </button>
-
             <div className="auth-modal-header">
-              <div className="auth-brand-badge">
-                <Edit2 size={22} className="auth-shield-icon" />
+              <div className="auth-header-title">
+                <Edit2 size={20} className="auth-title-icon" />
+                <h3>Edit Administrator Credential</h3>
               </div>
-              <h2 className="auth-modal-title">Edit Credential</h2>
-              <p className="auth-modal-subtitle">
-                Updating authorization for <strong>{selectedUser.name}</strong> ({selectedUser.email}).
-              </p>
+              <button
+                type="button"
+                className="auth-modal-close"
+                onClick={() => setShowEditAdminModal(false)}
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="auth-form-body">
+            <form onSubmit={handleUpdateAdminSubmit} className="auth-form-body">
               <div className="auth-input-group">
-                <label>Full Name</label>
+                <label>Administrator Name</label>
                 <div className="auth-input-wrapper">
                   <UserIcon size={16} className="auth-input-icon" />
                   <input
                     type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    value={adminFormData.name}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, name: e.target.value })}
                     required
                   />
                 </div>
@@ -655,8 +715,8 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                   <Mail size={16} className="auth-input-icon" />
                   <input
                     type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    value={adminFormData.email}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, email: e.target.value })}
                     required
                   />
                 </div>
@@ -667,19 +727,18 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                 <div className="auth-input-wrapper">
                   <Lock size={16} className="auth-input-icon" />
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Set new password (min. 6 characters)"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    type={showAdminPassword ? 'text' : 'password'}
+                    placeholder="Set new password (leave blank to keep current)"
+                    value={adminFormData.password}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, password: e.target.value })}
                   />
                   <button
                     type="button"
                     className="auth-eye-btn"
-                    onClick={() => setShowPassword(!showPassword)}
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
                     tabIndex={-1}
-                    title={showPassword ? "Hide password" : "Show password"}
                   >
-                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showAdminPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
               </div>
@@ -687,23 +746,23 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
               <div className="auth-input-group">
                 <label>Role Authorization</label>
                 <div className="auth-role-selector">
-                  <label className={`role-pill ${formData.role === 'admin' ? 'active' : ''}`}>
+                  <label className={`role-pill ${adminFormData.role === 'admin' ? 'active' : ''}`}>
                     <input
                       type="radio"
-                      name="role"
+                      name="adminEditRole"
                       value="admin"
-                      checked={formData.role === 'admin'}
-                      onChange={() => setFormData({ ...formData, role: 'admin' })}
+                      checked={adminFormData.role === 'admin'}
+                      onChange={() => setAdminFormData({ ...adminFormData, role: 'admin' })}
                     />
                     <span>Administrator</span>
                   </label>
-                  <label className={`role-pill ${formData.role === 'operator' ? 'active' : ''}`}>
+                  <label className={`role-pill ${adminFormData.role === 'operator' ? 'active' : ''}`}>
                     <input
                       type="radio"
-                      name="role"
+                      name="adminEditRole"
                       value="operator"
-                      checked={formData.role === 'operator'}
-                      onChange={() => setFormData({ ...formData, role: 'operator' })}
+                      checked={adminFormData.role === 'operator'}
+                      onChange={() => setAdminFormData({ ...adminFormData, role: 'operator' })}
                     />
                     <span>Operator</span>
                   </label>
@@ -716,14 +775,14 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
                   <Phone size={16} className="auth-input-icon" />
                   <input
                     type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    value={adminFormData.phone}
+                    onChange={(e) => setAdminFormData({ ...adminFormData, phone: e.target.value })}
                   />
                 </div>
               </div>
 
-              <button type="submit" className="auth-submit-btn" disabled={modalLoading}>
-                {modalLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+              <button type="submit" className="auth-submit-btn" disabled={adminModalLoading}>
+                {adminModalLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 <span>Update Credential</span>
               </button>
             </form>
@@ -731,9 +790,9 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
         </div>
       )}
 
-      {/* MODAL 3: DELETE CONFIRMATION */}
-      {showDeleteModal && selectedUser && (
-        <div className="auth-modal-backdrop" onClick={() => setShowDeleteModal(false)}>
+      {/* MODAL: DELETE ADMIN CONFIRMATION */}
+      {showDeleteAdminModal && selectedAdminUser && (
+        <div className="auth-modal-backdrop" onClick={() => setShowDeleteAdminModal(false)}>
           <div className="auth-modal-card animate-pop-in" onClick={(e) => e.stopPropagation()}>
             <div className="delete-confirm-box">
               <div className="delete-icon-bubble">
@@ -742,23 +801,23 @@ const AdminConsole = ({ onNavigate, onOpenAuth, currentUser, onLogout }) => {
               <h3>Delete Administrator Credential?</h3>
               <p>
                 Are you sure you want to permanently delete credentials for{' '}
-                <strong>{selectedUser.name}</strong> (<code>{selectedUser.email}</code>)? This user will immediately lose all JWT access to the IoT controls.
+                <strong>{selectedAdminUser.name}</strong> (<code>{selectedAdminUser.email}</code>)?
               </p>
               <div className="delete-modal-actions">
                 <button
                   type="button"
                   className="btn-modal-cancel"
-                  onClick={() => setShowDeleteModal(false)}
+                  onClick={() => setShowDeleteAdminModal(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   className="btn-modal-delete"
-                  onClick={handleDeleteConfirm}
-                  disabled={modalLoading}
+                  onClick={handleDeleteAdminConfirm}
+                  disabled={adminModalLoading}
                 >
-                  {modalLoading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  {adminModalLoading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   <span>Confirm Delete</span>
                 </button>
               </div>

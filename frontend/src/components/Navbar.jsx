@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Cpu,
@@ -11,6 +11,9 @@ import {
   LogOut,
   LogIn,
   ChevronDown,
+  Layers,
+  Users,
+  Smartphone,
 } from 'lucide-react';
 
 const Navbar = ({
@@ -19,12 +22,27 @@ const Navbar = ({
   onRefresh,
   currentUser,
   onOpenAuth,
+  onOpenProfile,
   onLogout,
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [dateStr, setDateStr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setUserDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const isAdmin = currentUser && String(currentUser.role).toUpperCase() === 'ADMIN';
 
   // Live real-time clock
   useEffect(() => {
@@ -133,18 +151,27 @@ const Navbar = ({
 
         {/* User / Admin Profile Chip */}
         {currentUser ? (
-          <div className="navbar-user-dropdown-wrap">
+          <div className="navbar-user-dropdown-wrap" ref={dropdownRef}>
             <button
               type="button"
               className="navbar-user-chip"
               onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+              aria-label="User account menu"
             >
               <div className="user-chip-avatar">
-                {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'A'}
+                {currentUser.picture ? (
+                  <img
+                    src={currentUser.picture}
+                    alt={currentUser.name}
+                    style={{ width: '100%', height: '100%', borderRadius: '50%' }}
+                  />
+                ) : (
+                  currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'
+                )}
               </div>
               <div className="user-info-text">
-                <span className="user-name">{currentUser.name}</span>
-                <span className="user-role-badge">{currentUser.role || 'Admin'}</span>
+                <span className="user-name">{currentUser.name || 'User'}</span>
+                {isAdmin && <span className="user-role-badge">Admin</span>}
               </div>
               <ChevronDown size={14} className="dropdown-caret" />
             </button>
@@ -154,19 +181,123 @@ const Navbar = ({
                 <div className="user-menu-header">
                   <strong>{currentUser.name}</strong>
                   <span className="user-menu-email">{currentUser.email}</span>
+                  <span className={`user-menu-role-tag ${isAdmin ? 'admin-tag' : 'user-tag'}`}>
+                    {isAdmin ? 'Administrator' : 'Standard User'}
+                  </span>
                 </div>
+
                 <div className="user-menu-divider"></div>
+                <div className="user-menu-section-label">NAVIGATION</div>
+
+                {/* All Tabs Navigation (User & Admin) */}
                 <button
                   type="button"
-                  className="user-menu-item"
+                  className={`user-menu-item ${currentPage === 'dashboard' ? 'active-item' : ''}`}
                   onClick={() => {
                     setUserDropdownOpen(false);
-                    if (onNavigate) onNavigate('admin');
+                    if (onNavigate) onNavigate('dashboard');
                   }}
                 >
-                  <ShieldCheck size={16} />
-                  <span>Admin Console</span>
+                  <LayoutDashboard size={15} />
+                  <span>Dashboard</span>
                 </button>
+
+                <button
+                  type="button"
+                  className={`user-menu-item ${currentPage === 'devices' ? 'active-item' : ''}`}
+                  onClick={() => {
+                    setUserDropdownOpen(false);
+                    if (onNavigate) onNavigate('devices');
+                  }}
+                >
+                  <Cpu size={15} />
+                  <span>Devices</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`user-menu-item ${currentPage === 'history' ? 'active-item' : ''}`}
+                  onClick={() => {
+                    setUserDropdownOpen(false);
+                    if (onNavigate) onNavigate('history');
+                  }}
+                >
+                  <History size={15} />
+                  <span>History</span>
+                </button>
+
+                {/* Admin Only: Dashboard Console & Management */}
+                {isAdmin && (
+                  <>
+                    <div className="user-menu-divider"></div>
+                    <div className="user-menu-section-label">ADMIN CONSOLE</div>
+
+                    <button
+                      type="button"
+                      className={`user-menu-item admin-menu-item ${currentPage === 'admin' ? 'active-item' : ''}`}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('admin');
+                      }}
+                    >
+                      <ShieldCheck size={15} />
+                      <span>Dashboard Console</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`user-menu-item ${currentPage === 'models' ? 'active-item' : ''}`}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('models');
+                      }}
+                    >
+                      <Layers size={15} />
+                      <span>Models</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`user-menu-item ${currentPage === 'registered-users' ? 'active-item' : ''}`}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('registered-users');
+                      }}
+                    >
+                      <Users size={15} />
+                      <span>Registered Users</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`user-menu-item ${currentPage === 'user-devices' ? 'active-item' : ''}`}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('user-devices');
+                      }}
+                    >
+                      <Smartphone size={15} />
+                      <span>User Registered Devices</span>
+                    </button>
+                  </>
+                )}
+
+                {/* Separate Profile */}
+                <div className="user-menu-divider"></div>
+                <div className="user-menu-section-label">ACCOUNT</div>
+
+                <button
+                  type="button"
+                  className={`user-menu-item ${currentPage === 'profile' ? 'active-item' : ''}`}
+                  onClick={() => {
+                    setUserDropdownOpen(false);
+                    if (onNavigate) onNavigate('profile');
+                  }}
+                >
+                  <User size={15} />
+                  <span>My Profile</span>
+                </button>
+
                 <button
                   type="button"
                   className="user-menu-item"
@@ -175,10 +306,12 @@ const Navbar = ({
                     if (onNavigate) onNavigate('landing');
                   }}
                 >
-                  <Droplets size={16} />
+                  <Droplets size={15} />
                   <span>Landing Page</span>
                 </button>
+
                 <div className="user-menu-divider"></div>
+
                 <button
                   type="button"
                   className="user-menu-item text-danger"
@@ -187,7 +320,7 @@ const Navbar = ({
                     if (onLogout) onLogout();
                   }}
                 >
-                  <LogOut size={16} />
+                  <LogOut size={15} />
                   <span>Sign Out</span>
                 </button>
               </div>

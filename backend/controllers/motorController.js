@@ -1,5 +1,6 @@
 const MotorHistory = require('../models/MotorHistory');
 const ForceControl = require('../models/ForceControl');
+const Device = require('../models/Device');
 const iotService = require('../services/iotService');
 
 /**
@@ -34,6 +35,29 @@ exports.getMotorHistory = async (req, res) => {
       filter.deviceId = String(devId).trim().toUpperCase();
     }
 
+    // Role-based Multi-User Scoping: regular users only see their own assigned AND APPROVED devices' history
+    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+    if (!isUserAdmin) {
+      if (!req.user) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      const userDevices = await Device.find({
+        assignedUserId: req.user._id,
+        $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+      }).select('deviceId').lean();
+      const userDeviceIds = userDevices.map(d => d.deviceId);
+      if (userDeviceIds.length === 0) {
+        return res.status(200).json({ success: true, count: 0, data: [] });
+      }
+      if (filter.deviceId) {
+        if (!userDeviceIds.includes(filter.deviceId)) {
+          return res.status(403).json({ success: false, message: 'Access denied: this device is not assigned to your account' });
+        }
+      } else {
+        filter.deviceId = { $in: userDeviceIds };
+      }
+    }
+
     const history = await MotorHistory.find(filter)
       .sort({ startTime: -1 })
       .limit(limit)
@@ -64,6 +88,35 @@ exports.getMotorConsumption = async (req, res) => {
     const devId = req.query?.deviceId || req.body?.deviceId;
     if (devId) {
       filter.deviceId = String(devId).trim().toUpperCase();
+    }
+
+    // Role-based Multi-User Scoping:
+    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+    if (!isUserAdmin) {
+      if (!req.user) {
+        return res.status(200).json({
+          success: true,
+          data: { totalOnEvents: 0, totalOffEvents: 0, days: [] },
+        });
+      }
+      const userDevices = await Device.find({
+        assignedUserId: req.user._id,
+        $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+      }).select('deviceId').lean();
+      const userDeviceIds = userDevices.map(d => d.deviceId);
+      if (userDeviceIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: { totalOnEvents: 0, totalOffEvents: 0, days: [] },
+        });
+      }
+      if (filter.deviceId) {
+        if (!userDeviceIds.includes(filter.deviceId)) {
+          return res.status(403).json({ success: false, message: 'Access denied: this device is not assigned to your account' });
+        }
+      } else {
+        filter.deviceId = { $in: userDeviceIds };
+      }
     }
 
     const histories = await MotorHistory.find(filter).lean();

@@ -30,6 +30,8 @@ import {
   RefreshCw,
   FileSpreadsheet,
   Layers,
+  AlertTriangle,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -54,10 +56,14 @@ import {
   forceMotorOff,
   getDevices,
   getData,
+  getFaultLogs,
+  resolveFaultLog,
 } from '../services/api';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import Navbar from '../components/Navbar';
+import Models from './Models';
+import { getModelConfig } from '../config/motorModels';
 
 /* ==========================================================================
    Helper Utilities
@@ -80,65 +86,279 @@ const formatTimeLabel = (dateStr) => {
 
 /* ==========================================================================
    1. Subcomponent: PowerMetricsCard (Top-Right Colored Cards)
+   Dynamic Single-Phase (Voltage, Current) vs 3-Phase (Vol 1-3, Cu 1-3), Frequency, PF
    ========================================================================== */
-const PowerMetricsCard = ({ metrics, hasData = true }) => {
-  const { voltage, current, power, powerFactor } = metrics || {};
-  const showDash = !hasData || voltage === null || voltage === undefined;
+const PowerMetricsCard = ({ metrics, modelNumber, hasData = true }) => {
+  const {
+    voltage,
+    current,
+    vol1,
+    vol2,
+    vol3,
+    cu1,
+    cu2,
+    cu3,
+    power,
+    powerFactor,
+    frequency,
+    energy,
+  } = metrics || {};
+
+  const modelConfig = getModelConfig(modelNumber);
+  const isExplicitThreePhase = modelConfig?.electrical?.phaseType === 'three' || modelNumber === 'SG-3PD-7.5' || modelNumber === 'SG-3PSD-15';
+  const isExplicitSinglePhase = modelConfig?.electrical?.phaseType === 'single' || modelNumber === 'SG-1PS-1.5' || modelNumber === 'SG-1PD-1.5';
+  const hasStarDelta = Boolean(modelConfig?.specialDisplay?.hasStarDeltaStages || modelNumber === 'SG-3PSD-15');
+  const starDeltaStage = metrics?.starDeltaStage || metrics?.motorStage || (hasStarDelta ? 'DELTA' : null);
+
+  // 1. Detect Voltage mode: Three-phase vs Single-phase
+  const hasThreePhaseVoltages =
+    !isExplicitSinglePhase && (
+      isExplicitThreePhase || (
+        vol1 !== undefined && vol1 !== null &&
+        vol2 !== undefined && vol2 !== null &&
+        vol3 !== undefined && vol3 !== null
+      )
+    );
+  const hasSingleVoltage = voltage !== undefined && voltage !== null;
+
+  // 2. Detect Current mode: Three-phase vs Single-phase
+  const hasThreePhaseCurrents =
+    !isExplicitSinglePhase && (
+      isExplicitThreePhase || (
+        cu1 !== undefined && cu1 !== null &&
+        cu2 !== undefined && cu2 !== null &&
+        cu3 !== undefined && cu3 !== null
+      )
+    );
+  const hasSingleCurrent = current !== undefined && current !== null;
+
+  // Common electrical fields
+  const hasPower = power !== undefined && power !== null;
+  const hasPowerFactor = powerFactor !== undefined && powerFactor !== null;
+  const hasFrequency = frequency !== undefined && frequency !== null;
+  const resolvedEnergy = energy !== undefined && energy !== null
+    ? energy
+    : (metrics?.energyConsumption !== undefined && metrics?.energyConsumption !== null ? metrics.energyConsumption : null);
+  const hasEnergy = resolvedEnergy !== undefined && resolvedEnergy !== null;
+  const isThreePhase = Boolean(hasThreePhaseVoltages || hasThreePhaseCurrents);
 
   return (
     <div className="dash-card power-metrics-section">
       <div className="section-top-bar">
         <div>
-          <h3>Power Monitoring</h3>
-          <p>Real-time line voltage, load current, power and power factor</p>
+          <h3>Electrical Parameters</h3>
+          <p>
+            {isThreePhase ? 'Three-Phase Line Monitoring' : 'Single-Phase Line Monitoring'} & Power Metrics
+          </p>
         </div>
-      </div>
-
-      <div className="metric-cards-grid">
-        <div className="colored-stat-block stat-orange">
-          <div className="stat-label-wrap">
-            <span className="stat-label">Voltage</span>
-            <Zap size={16} className="stat-icon" />
-          </div>
-          <div className="stat-value-wrap">
-            <span className="stat-value">{showDash ? '-' : Number(voltage).toFixed(1)}</span>
-            {!showDash && <span className="stat-unit">V</span>}
-          </div>
-        </div>
-
-        <div className="colored-stat-block stat-navy">
-          <div className="stat-label-wrap">
-            <span className="stat-label">Current</span>
-            <Activity size={16} className="stat-icon" />
-          </div>
-          <div className="stat-value-wrap">
-            <span className="stat-value">{showDash ? '-' : Number(current).toFixed(2)}</span>
-            {!showDash && <span className="stat-unit">A</span>}
-          </div>
-        </div>
-
-        <div className="colored-stat-block stat-blue">
-          <div className="stat-label-wrap">
-            <span className="stat-label">Power</span>
-            <Cpu size={16} className="stat-icon" />
-          </div>
-          <div className="stat-value-wrap">
-            <span className="stat-value">{showDash ? '-' : Math.round(power).toLocaleString()}</span>
-            {!showDash && <span className="stat-unit">W</span>}
-          </div>
-        </div>
-
-        <div className="colored-stat-block stat-pf">
-          <div className="stat-label-wrap">
-            <span className="stat-label">PF</span>
-            <Gauge size={16} className="stat-icon" />
-          </div>
-          <div className="stat-value-wrap">
-            <span className="stat-value" style={{ fontSize: '22px' }}>
-              {showDash ? '-' : Number(powerFactor).toFixed(2)}
+        {hasStarDelta && (
+          <div className="star-delta-badge-wrap">
+            <span className="stage-chip-label">Starter:</span>
+            <span className={`star-delta-stage-chip stage-${(starDeltaStage || 'DELTA').toLowerCase()}`}>
+              {starDeltaStage || 'DELTA'}
             </span>
           </div>
-        </div>
+        )}
+      </div>
+
+      <div className={`metric-cards-grid ${isThreePhase ? 'grid-5-col' : 'grid-3-col'}`}>
+        {isThreePhase ? (
+          <>
+            {/* 10 CARDS - 5/5 LAYOUT */}
+            {/* Top Row (5 cards): Voltage 1, Voltage 2, Voltage 3, Power, Frequency */}
+            <div className="colored-stat-block stat-orange">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Voltage 1</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{vol1 !== undefined && vol1 !== null ? Number(vol1).toFixed(1) : '-'}</span>
+                {vol1 !== undefined && vol1 !== null && <span className="stat-unit">V</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-orange">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Voltage 2</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{vol2 !== undefined && vol2 !== null ? Number(vol2).toFixed(1) : '-'}</span>
+                {vol2 !== undefined && vol2 !== null && <span className="stat-unit">V</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-orange">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Voltage 3</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{vol3 !== undefined && vol3 !== null ? Number(vol3).toFixed(1) : '-'}</span>
+                {vol3 !== undefined && vol3 !== null && <span className="stat-unit">V</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-blue">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Power</span>
+                <Cpu size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{hasPower ? Math.round(power).toLocaleString() : '-'}</span>
+                {hasPower && <span className="stat-unit">W</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-frequency">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Frequency</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasFrequency ? Number(frequency).toFixed(1) : (hasData ? '50.0' : '-')}
+                </span>
+                <span className="stat-unit">Hz</span>
+              </div>
+            </div>
+
+            {/* Bottom Row (5 cards): Current 1, Current 2, Current 3, Energy, Power Factor */}
+            <div className="colored-stat-block stat-navy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Current 1</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{cu1 !== undefined && cu1 !== null ? Number(cu1).toFixed(2) : '-'}</span>
+                {cu1 !== undefined && cu1 !== null && <span className="stat-unit">A</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-navy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Current 2</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{cu2 !== undefined && cu2 !== null ? Number(cu2).toFixed(2) : '-'}</span>
+                {cu2 !== undefined && cu2 !== null && <span className="stat-unit">A</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-navy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Current 3</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{cu3 !== undefined && cu3 !== null ? Number(cu3).toFixed(2) : '-'}</span>
+                {cu3 !== undefined && cu3 !== null && <span className="stat-unit">A</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-energy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Energy</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasEnergy ? Number(resolvedEnergy).toFixed(2) : (hasData ? '0.00' : '-')}
+                </span>
+                <span className="stat-unit">kWh</span>
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-pf">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Power Factor</span>
+                <Gauge size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasPowerFactor ? Number(powerFactor).toFixed(2) : '-'}
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 6 CARDS - 3/3 LAYOUT */}
+            {/* Top Row (3 cards): Voltage, Current, Power */}
+            <div className="colored-stat-block stat-orange">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Voltage</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{hasSingleVoltage ? Number(voltage).toFixed(1) : '-'}</span>
+                {hasSingleVoltage && <span className="stat-unit">V</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-navy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Current</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{hasSingleCurrent ? Number(current).toFixed(2) : '-'}</span>
+                {hasSingleCurrent && <span className="stat-unit">A</span>}
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-blue">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Power</span>
+                <Cpu size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">{hasPower ? Math.round(power).toLocaleString() : '-'}</span>
+                {hasPower && <span className="stat-unit">W</span>}
+              </div>
+            </div>
+
+            {/* Bottom Row (3 cards): Frequency, Energy, Power Factor */}
+            <div className="colored-stat-block stat-frequency">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Frequency</span>
+                <Activity size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasFrequency ? Number(frequency).toFixed(1) : (hasData ? '50.0' : '-')}
+                </span>
+                <span className="stat-unit">Hz</span>
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-energy">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Energy</span>
+                <Zap size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasEnergy ? Number(resolvedEnergy).toFixed(2) : (hasData ? '0.00' : '-')}
+                </span>
+                <span className="stat-unit">kWh</span>
+              </div>
+            </div>
+
+            <div className="colored-stat-block stat-pf">
+              <div className="stat-label-wrap">
+                <span className="stat-label">Power Factor</span>
+                <Gauge size={15} className="stat-icon" />
+              </div>
+              <div className="stat-value-wrap">
+                <span className="stat-value">
+                  {hasPowerFactor ? Number(powerFactor).toFixed(2) : '-'}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -304,132 +524,293 @@ const PowerConsumptionChart = ({ data = [], onRangeChange, currentRange = '24h' 
 };
 
 /* ==========================================================================
-   5. Subcomponent: WaterTankCard (Middle-Right with Animated Wave Physics)
+   4b. Subcomponent: SingleAnimatedTank (Glass Vessel with Sea Wave Water Animation)
    ========================================================================== */
-const WaterTankCard = ({ waterLevel, capacityLiters = 1000, currentLiters, hasData = true }) => {
-  const [viewMode, setViewMode] = useState('tank');
-  const hasLevel = hasData && waterLevel !== null && waterLevel !== undefined;
-  const clampedLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(waterLevel))) : 0;
+const SingleAnimatedTank = ({
+  title,
+  tag,
+  tagBg,
+  tagColor,
+  icon: Icon,
+  status,
+  level,
+  capacity,
+  currentLiters,
+  renderStatusBadge,
+}) => {
+  const hasLevel = level !== undefined && level !== null;
+  const clampedLevel = hasLevel ? Math.max(0, Math.min(100, Math.round(level))) : 0;
   const displayLiters = hasLevel
     ? (currentLiters !== undefined && currentLiters !== null
-        ? Math.round(currentLiters)
-        : Math.round((clampedLevel / 100) * capacityLiters))
+      ? Math.round(currentLiters)
+      : (capacity ? Math.round((clampedLevel / 100) * capacity) : null))
     : null;
 
-  const radius = 54;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = hasLevel ? circumference - (clampedLevel / 100) * circumference : circumference;
+  // Resolve 3-state label: Low (Red), Med (Orange), High (Green) - No 0% to 100% numbers
+  const displayStatus = (() => {
+    if (status) {
+      const s = String(status).toLowerCase();
+      if (s === 'low') return 'Low';
+      if (s === 'high') return 'High';
+      return 'Med';
+    }
+    if (hasLevel) {
+      if (clampedLevel < 25) return 'Low';
+      if (clampedLevel > 75) return 'High';
+      return 'Med';
+    }
+    return '-';
+  })();
+
+  const getLevelColor = (label) => {
+    switch (String(label).toLowerCase()) {
+      case 'high':
+        return '#10B981'; // Green
+      case 'med':
+      case 'medium':
+        return '#F59E0B'; // Orange
+      case 'low':
+        return '#EF4444'; // Red
+      default:
+        return '#94A3B8';
+    }
+  };
+
+  const statusColor = getLevelColor(displayStatus);
+
+  // Visual water height percentage (either sensor percentage or probe status position)
+  const waterHeight = hasLevel && clampedLevel > 0
+    ? clampedLevel
+    : (displayStatus === 'High' ? 85 : displayStatus === 'Med' ? 50 : displayStatus === 'Low' ? 22 : 0);
+
+  // Water is oceanic blue with flowing wave engine as requested: "inside tank water color blue and flow like wave"
+  const liquidGradient = 'linear-gradient(180deg, #0EA5E9 0%, #0284C7 25%, #0369A1 60%, #075985 100%)';
+  const waveFills = { back: '#0369A1', mid: '#0284C7', front: '#38BDF8' };
 
   return (
-    <div className="dash-card water-tank-card">
+    <div className="single-tank-box">
+      {/* Tank Box Header */}
+      <div className="tank-box-header">
+        <div className="tank-box-title">
+          <Icon size={16} color={tagColor || '#0284C7'} />
+          <span>{title}</span>
+        </div>
+        <span className="tank-tag-badge" style={{ background: tagBg || '#E0F2FE', color: tagColor || '#0369A1' }}>
+          {tag}
+        </span>
+      </div>
+
+      {/* Water Level Status Row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+        <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 600 }}>Water Level Status:</span>
+        {renderStatusBadge(status)}
+      </div>
+
+      {/* Old Animated Flowing Water Tank */}
+      <div className="tank-visual-wrapper">
+        <div className="tank-glass-container">
+          {/* Graduation Markers (Left Ruler) - Low (Red), Med (Orange), High (Green) - No 0% to 100% Numbers */}
+          <div className="tank-graduation-marks">
+            <div className="mark-tick mark-high">
+              <span className="mark-line" style={{ background: '#10B981', boxShadow: '0 0 5px rgba(16, 185, 129, 0.9)' }}></span>
+              <span style={{ color: '#10B981', fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(16, 185, 129, 0.4)' }}>High</span>
+            </div>
+            <div className="mark-tick mark-med">
+              <span className="mark-line" style={{ background: '#F59E0B', boxShadow: '0 0 5px rgba(245, 158, 11, 0.9)' }}></span>
+              <span style={{ color: '#F59E0B', fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(245, 158, 11, 0.4)' }}>Med</span>
+            </div>
+            <div className="mark-tick mark-low">
+              <span className="mark-line" style={{ background: '#EF4444', boxShadow: '0 0 5px rgba(239, 68, 68, 0.9)' }}></span>
+              <span style={{ color: '#EF4444', fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(239, 68, 68, 0.4)' }}>Low</span>
+            </div>
+          </div>
+
+          {/* Liquid Body with Oceanic Sea Wave Engine (Colored by status) */}
+          <div
+            className="liquid-body"
+            style={{
+              height: `${waterHeight}%`,
+              minHeight: waterHeight > 0 ? '24px' : '0px',
+              background: liquidGradient,
+            }}
+          >
+            <div className="sea-wave-wrap">
+              <svg className="sea-wave sea-wave-back" style={{ fill: waveFills.back }} viewBox="0 0 1200 120" preserveAspectRatio="none">
+                <path d="M0,45 C150,85 350,-15 500,35 C650,85 850,-15 1000,35 C1150,85 1350,-15 1500,35 L1500,120 L0,120 Z" />
+              </svg>
+              <svg className="sea-wave sea-wave-mid" style={{ fill: waveFills.mid }} viewBox="0 0 1200 120" preserveAspectRatio="none">
+                <path d="M0,30 C200,-10 400,70 600,25 C800,-15 1000,65 1200,25 C1400,-15 1600,65 1800,25 L1800,120 L0,120 Z" />
+              </svg>
+              <svg className="sea-wave sea-wave-front" style={{ fill: waveFills.front }} viewBox="0 0 1200 120" preserveAspectRatio="none">
+                <path d="M0,15 C150,60 300,-10 450,20 C600,60 750,-10 900,20 C1050,60 1200,-10 1350,20 L1350,120 L0,120 Z" />
+              </svg>
+            </div>
+          </div>
+
+          {/* Centered Digital Floating Badge - Shows Colored Label (High / Med / Low) */}
+          <div
+            className="tank-center-badge"
+            style={{
+              borderColor: statusColor !== '#94A3B8' ? statusColor : 'rgba(255, 255, 255, 0.3)',
+              boxShadow: statusColor !== '#94A3B8'
+                ? `0 4px 16px rgba(0, 0, 0, 0.35), 0 0 12px ${statusColor}40`
+                : '0 4px 16px rgba(0, 0, 0, 0.3)',
+            }}
+          >
+            <div
+              className="tank-percentage-number"
+              style={{
+                fontSize: '20px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.8px',
+                color: statusColor,
+                textShadow: `0 2px 6px rgba(0, 0, 0, 0.8), 0 0 8px ${statusColor}55`,
+              }}
+            >
+              {displayStatus}
+            </div>
+            {displayLiters !== null && capacity !== null && (
+              <div className="tank-capacity-sub">
+                {displayLiters} / {capacity} L
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Metrics Details */}
+      <div className="tank-box-metrics">
+        <div className="tank-metric-stat">
+          <span className="tank-metric-label">Current Level</span>
+          <span className="tank-metric-value" style={{ color: statusColor, fontSize: '17px', fontWeight: 800 }}>
+            {displayStatus}
+          </span>
+        </div>
+
+        <div className="tank-metric-stat" style={{ textAlign: 'right' }}>
+          <span className="tank-metric-label">Available Capacity</span>
+          <span className="tank-metric-value" style={{ fontSize: '14px' }}>
+            {displayLiters !== null && capacity !== null
+              ? `${displayLiters} / ${capacity} L`
+              : (capacity !== null ? `${capacity} L` : '-')}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ==========================================================================
+   5. Subcomponent: WaterTankCard (Dual Tank Capacity: Sump Tank & Overhead Tank)
+   3-State Water Level Status: Low (Red), Medium (Orange), High (Green)
+   ========================================================================== */
+const WaterTankCard = ({
+  waterLevel,
+  capacityLiters,
+  currentLiters,
+  waterLevelStatus,
+  sumpTank,
+  overheadTank,
+  modelNumber,
+  hasData = true,
+}) => {
+  const modelConfig = getModelConfig(modelNumber);
+  const showSumpTank = modelConfig ? modelConfig.specialDisplay.showSumpTank : (modelNumber === 'SG-1PS-1.5' ? false : true);
+
+  // Overhead Tank data resolution (do not assume 1000L if not provided)
+  const overheadCap = overheadTank?.capacity !== undefined && overheadTank?.capacity !== null
+    ? Number(overheadTank.capacity)
+    : (capacityLiters !== undefined && capacityLiters !== null ? Number(capacityLiters) : null);
+
+  const overheadLvl = overheadTank?.waterLevel !== undefined && overheadTank?.waterLevel !== null
+    ? Number(overheadTank.waterLevel)
+    : (waterLevel !== undefined && waterLevel !== null ? Number(waterLevel) : null);
+
+  const overheadStatus = overheadTank?.waterLevelStatus || waterLevelStatus || (overheadLvl !== null ? (overheadLvl < 25 ? 'Low' : overheadLvl > 75 ? 'High' : 'Medium') : null);
+
+  const overheadCurrentL = overheadTank?.currentLiters !== undefined && overheadTank?.currentLiters !== null
+    ? Math.round(overheadTank.currentLiters)
+    : (currentLiters !== undefined && currentLiters !== null
+      ? Math.round(currentLiters)
+      : (overheadLvl !== null && overheadCap ? Math.round((overheadLvl / 100) * overheadCap) : null));
+
+  // Sump Tank data resolution
+  const sumpCap = sumpTank?.capacity !== undefined && sumpTank?.capacity !== null ? Number(sumpTank.capacity) : null;
+  const sumpLvl = sumpTank?.waterLevel !== undefined && sumpTank?.waterLevel !== null ? Number(sumpTank.waterLevel) : null;
+  const sumpStatus = sumpTank?.waterLevelStatus || (sumpLvl !== null ? (sumpLvl < 25 ? 'Low' : sumpLvl > 75 ? 'High' : 'Medium') : null);
+  const sumpCurrentL = sumpTank?.currentLiters !== undefined && sumpTank?.currentLiters !== null
+    ? Math.round(sumpTank.currentLiters)
+    : (sumpLvl !== null && sumpCap ? Math.round((sumpLvl / 100) * sumpCap) : null);
+
+  // Status badge helper
+  const renderStatusBadge = (status) => {
+    if (!status) return <span style={{ color: '#94A3B8', fontSize: '11px', fontWeight: 600 }}>Unavailable</span>;
+    const lower = String(status).toLowerCase();
+    const clean = lower === 'low' ? 'Low' : lower === 'high' ? 'High' : 'Medium';
+    return (
+      <span className={`water-level-status-pill wl-status-${clean.toLowerCase()}`}>
+        <span className="wl-dot"></span>
+        <span>{clean}</span>
+      </span>
+    );
+  };
+
+  // Get bar color based on status or level
+  const getFillColor = (lvl, status) => {
+    const s = String(status || '').toLowerCase();
+    if (s === 'low' || (lvl !== null && lvl < 25)) return '#EF4444';
+    if (s === 'medium' || (lvl !== null && lvl <= 75)) return '#F59E0B';
+    if (s === '' || (lvl !== null && lvl > 75)) return '#10B981';
+    return '#CBD5E1';
+  };
+
+  return (
+    <div className="dash-card water-tank-card dual-tanks-card">
       <div className="tank-header">
         <div>
-          <h3>Water Tank Level</h3>
+          <h3>{showSumpTank ? 'Tank Capacity & Water Level' : 'Overhead Tank Capacity & Water Level'}</h3>
           <p style={{ fontSize: '11px', color: '#94A3B8', marginTop: '2px' }}>
-            Ultrasonic Depth Telemetry
+            {showSumpTank
+              ? 'Dual-tank monitoring with 3-state level visualizers'
+              : 'Single overhead tank monitoring (Model SG-1PS-1.5 Submersible)'}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={() => setViewMode(viewMode === 'tank' ? 'gauge' : 'tank')}
-            title="Toggle Tank View / Circular Gauge View"
-            style={{
-              background: '#F1F5F9',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '4px 8px',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: '#64748B',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            {viewMode === 'tank' ? <BarChart2 size={12} /> : <Droplet size={12} />}
-            <span>{viewMode === 'tank' ? 'Gauge View' : 'Tank View'}</span>
-          </button>
           <Settings size={18} className="tank-gear-icon" />
         </div>
       </div>
 
-      {viewMode === 'tank' ? (
-        <div className="tank-visual-wrapper">
-          <div className="tank-glass-container">
-            <div className="tank-graduation-marks">
-              <div className="mark-tick"><span className="mark-line"></span>100%</div>
-              <div className="mark-tick"><span className="mark-line"></span>75%</div>
-              <div className="mark-tick"><span className="mark-line"></span>50%</div>
-              <div className="mark-tick"><span className="mark-line"></span>25%</div>
-              <div className="mark-tick"><span className="mark-line"></span>0%</div>
-            </div>
+      {/* Tank Capacity Section */}
+      <div className={showSumpTank ? "dual-tanks-grid" : "single-tank-grid"}>
+        {/* 1. Sump Tank with Old Animated Water Inside Tank (Hidden on Model 1) */}
+        {showSumpTank && (
+          <SingleAnimatedTank
+            title="Sump Tank"
+            tag="Sump"
+            tagBg="#E0F2FE"
+            tagColor="#0284C7"
+            icon={Droplet}
+            status={sumpStatus}
+            level={sumpLvl}
+            capacity={sumpCap}
+            currentLiters={sumpCurrentL}
+            renderStatusBadge={renderStatusBadge}
+          />
+        )}
 
-            <div className="liquid-body" style={{ height: `${clampedLevel}%`, minHeight: clampedLevel > 0 ? '24px' : '0px' }}>
-              <div className="sea-wave-wrap">
-                <svg className="sea-wave sea-wave-back" viewBox="0 0 1200 120" preserveAspectRatio="none">
-                  <path d="M0,45 C150,85 350,-15 500,35 C650,85 850,-15 1000,35 C1150,85 1350,-15 1500,35 L1500,120 L0,120 Z" />
-                </svg>
-                <svg className="sea-wave sea-wave-mid" viewBox="0 0 1200 120" preserveAspectRatio="none">
-                  <path d="M0,30 C200,-10 400,70 600,25 C800,-15 1000,65 1200,25 C1400,-15 1600,65 1800,25 L1800,120 L0,120 Z" />
-                </svg>
-                <svg className="sea-wave sea-wave-front" viewBox="0 0 1200 120" preserveAspectRatio="none">
-                  <path d="M0,15 C150,60 300,-10 450,20 C600,60 750,-10 900,20 C1050,60 1200,-10 1350,20 L1350,120 L0,120 Z" />
-                </svg>
-              </div>
-            </div>
-
-            <div className="tank-center-badge">
-              <div className="tank-percentage-number">{hasLevel ? `${clampedLevel}%` : '-'}</div>
-              <div className="tank-capacity-sub">
-                {displayLiters !== null ? `${displayLiters} / ${capacityLiters} L` : `- / ${capacityLiters} L`}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="tank-visual-wrapper" style={{ flexDirection: 'column' }}>
-          <div style={{ position: 'relative', width: '140px', height: '140px' }}>
-            <svg style={{ transform: 'rotate(-90deg)', width: '100%', height: '100%' }} viewBox="0 0 140 140">
-              <circle cx="70" cy="70" r={radius} fill="none" stroke="#E2E8F0" strokeWidth="14" />
-              <circle
-                cx="70"
-                cy="70"
-                r={radius}
-                fill="none"
-                stroke="#00A896"
-                strokeWidth="14"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                style={{ transition: 'stroke-dashoffset 0.8s ease' }}
-              />
-            </svg>
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: '#1E293B', lineHeight: 1 }}>
-                {hasLevel && displayLiters !== null ? displayLiters : '-'}
-              </div>
-              <div style={{ fontSize: '10px', fontWeight: 700, color: '#94A3B8', marginTop: '3px' }}>
-                LITERS
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="tank-footer-status">
-        <div className="tank-status-pill">
-          <span className="status-dot" style={{ backgroundColor: '#F59E0B' }}></span>
-          <span>Low (&lt;25%)</span>
-        </div>
-        <div className="tank-status-pill">
-          <span className="status-dot" style={{ backgroundColor: '#10B981' }}></span>
-          <span>Normal</span>
-        </div>
-        <div className="tank-status-pill">
-          <span className="status-dot" style={{ backgroundColor: '#0284C7' }}></span>
-          <span>Full (&gt;85%)</span>
-        </div>
+        {/* 2. Overhead Tank with Old Animated Water Inside Tank */}
+        <SingleAnimatedTank
+          title="Overhead Tank"
+          tag="Overhead"
+          tagBg="#CCFBF1"
+          tagColor="#00A896"
+          icon={Droplets}
+          status={overheadStatus}
+          level={overheadLvl}
+          capacity={overheadCap}
+          currentLiters={overheadCurrentL}
+          renderStatusBadge={renderStatusBadge}
+        />
       </div>
     </div>
   );
@@ -844,13 +1225,14 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
     if (activeRecords.length === 0) return;
     let csvContent = '';
     if (activeTab === 'motor') {
-      const headers = ['#', 'Device ID', 'Date & Time', 'Status', 'Duration (Seconds)', 'Hours Formatted', 'Hours Decimal'];
+      const headers = ['#', 'Device ID', 'Date & Time', 'Status', 'Motor State', 'Duration (Seconds)', 'Hours Formatted', 'Hours Decimal'];
       const rows = filteredMotorRecords.map((e, idx) => {
         const dur = getItemDuration(e);
         return [
           idx + 1,
           e.deviceId || selectedDeviceId || 'N/A',
           new Date(e.startTime || e.timestamp).toLocaleString(),
+          'Active',
           e.motorStatus,
           dur,
           formatDuration(dur),
@@ -859,11 +1241,12 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
       });
       csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     } else {
-      const headers = ['#', 'Device ID', 'Date & Time', 'Water Level (%)', 'Water (L)', 'Motor Status', 'Voltage (V)', 'Current (A)', 'Power (W)', 'Energy (kWh)'];
+      const headers = ['#', 'Device ID', 'Date & Time', 'Status', 'Water Level (%)', 'Water (L)', 'Motor Status', 'Voltage (V)', 'Current (A)', 'Power (W)', 'Energy (kWh)'];
       const rows = filteredTelemetryRecords.map((t, idx) => [
         idx + 1,
         t.deviceId || selectedDeviceId || 'N/A',
         new Date(t.timestamp).toLocaleString(),
+        (t.deviceStatus === 'Fault' || t.status === 'Fault' ? 'Fault' : 'Active'),
         t.waterLevel || 0,
         t.waterConsumption || 0,
         t.motorStatus || 'OFF',
@@ -902,6 +1285,12 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
         </div>
 
         <div className="history-table-actions">
+          {/* Live 1-Second Heartbeat & Telemetry Acknowledgement Badge */}
+          <div className="table-live-ack-chip" title="Live 1-second telemetry heartbeat and status acknowledgement active">
+            <span className="live-pulse-dot"></span>
+            <span>Live ACK</span>
+          </div>
+
           {/* View Mode Toggle: Motor Hours vs Telemetry */}
           <div className="history-view-toggle">
             <button
@@ -1047,6 +1436,7 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
                   <th style={{ width: '50px' }}>#</th>
                   <th>Date & Time</th>
                   <th>Device</th>
+                  <th>Status</th>
                   <th>Motor Status</th>
                   <th>Hours ON</th>
                   <th>Hours OFF</th>
@@ -1081,6 +1471,12 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
                       </td>
                       <td className="col-device">
                         <span className="device-tag-code">{item.deviceId || selectedDeviceId || 'WT-DEV-001'}</span>
+                      </td>
+                      <td className="col-op-status">
+                        <span className="badge-status-active">
+                          <CheckCircle2 size={12} />
+                          <span>Active</span>
+                        </span>
                       </td>
                       <td className="col-status">
                         <span className={`motor-status-chip ${isOn ? 'on' : 'off'}`}>
@@ -1128,6 +1524,7 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
                   <th style={{ width: '50px' }}>#</th>
                   <th>Timestamp</th>
                   <th>Device ID</th>
+                  <th>Status</th>
                   <th>Water Level</th>
                   <th>Motor Status</th>
                   <th>Voltage</th>
@@ -1139,6 +1536,7 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
               <tbody>
                 {paginatedRecords.map((t, idx) => {
                   const isOn = t.motorStatus === 'ON';
+                  const isFault = t.deviceStatus === 'Fault' || t.status === 'Fault';
                   const rowNumber = (currentPage - 1) * pageSize + idx + 1;
                   return (
                     <tr key={t._id || idx}>
@@ -1160,6 +1558,19 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
                       </td>
                       <td className="col-device">
                         <span className="device-tag-code">{t.deviceId || selectedDeviceId || 'WT-DEV-001'}</span>
+                      </td>
+                      <td className="col-op-status">
+                        {isFault ? (
+                          <span className="badge-status-fault">
+                            <AlertTriangle size={12} />
+                            <span>Fault</span>
+                          </span>
+                        ) : (
+                          <span className="badge-status-active">
+                            <CheckCircle2 size={12} />
+                            <span>Active</span>
+                          </span>
+                        )}
                       </td>
                       <td className="col-water">
                         <div className="water-level-cell">
@@ -1282,19 +1693,338 @@ const DashboardHistoryTable = ({ selectedDeviceId, hasData = true }) => {
 };
 
 /* ==========================================================================
+   10. Subcomponent: LiveAcknowledgementSection (Requirement 6: 1-second refresh)
+   ========================================================================== */
+const LiveAcknowledgementSection = ({ selectedDeviceId, isConnected }) => {
+  const [ackData, setAckData] = useState({
+    status: 'Active',
+    acknowledgedAt: new Date().toISOString(),
+    serverTime: Date.now(),
+  });
+  const [secondsAgo, setSecondsAgo] = useState(0);
+
+  useEffect(() => {
+    // 1. Listen for live 1-second heartbeat from Socket.IO
+    function onDeviceAck(data) {
+      if (data) {
+        setAckData(data);
+        setSecondsAgo(0);
+      }
+    }
+
+    socket.on('device_ack', onDeviceAck);
+
+    // 2. 1-second interval ticker with cleanup on unmount
+    const ticker = setInterval(() => {
+      setSecondsAgo((prev) => prev + 1);
+    }, 1000);
+
+    return () => {
+      socket.off('device_ack', onDeviceAck);
+      clearInterval(ticker);
+    };
+  }, []);
+
+  const isAckFresh = isConnected && secondsAgo <= 3;
+  const isAckWarning = isConnected && secondsAgo > 3 && secondsAgo <= 10;
+  const isAckOffline = !isConnected || secondsAgo > 10;
+
+  const statusLabel = isAckOffline
+    ? 'Offline'
+    : (isAckWarning ? 'Waiting for ACK' : 'Active');
+
+  const statusClass = isAckOffline
+    ? 'offline'
+    : (isAckWarning ? 'waiting' : 'active');
+
+  const formattedTime = ackData.acknowledgedAt
+    ? new Date(ackData.acknowledgedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '--:--:--';
+
+  return (
+    <div className="ack-card">
+      <div className="ack-left">
+        <div className="ack-beacon-pulse">
+          <span
+            className="ack-beacon-dot"
+            style={{
+              background: isAckOffline ? '#EF4444' : (isAckWarning ? '#F59E0B' : '#10B981'),
+            }}
+          />
+          {isAckFresh && <span className="ack-beacon-ring" />}
+        </div>
+        <div className="ack-title-wrap">
+          <h4>Live Acknowledgement Status</h4>
+          <p>Continuous 1-second controller heartbeat & telemetry handshake</p>
+        </div>
+      </div>
+
+      <div className="ack-right">
+        <div className="ack-time-chip">
+          Last ACK: {formattedTime} ({secondsAgo}s ago)
+        </div>
+        <span className={`ack-status-badge ${statusClass}`}>
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: isAckOffline ? '#DC2626' : (isAckWarning ? '#D97706' : '#059669'),
+            }}
+          />
+          <span>{statusLabel}</span>
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/* ==========================================================================
+   11. Subcomponent: FaultLogsSection (Requirement 8: Dedicated Fault Records)
+   ========================================================================== */
+const FaultLogsSection = ({ selectedDeviceId }) => {
+  const [faults, setFaults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchFaults = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await getFaultLogs({ deviceId: selectedDeviceId || undefined, limit: 20 });
+      if (res.data?.success) {
+        setFaults(res.data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to load fault logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    fetchFaults();
+  }, [fetchFaults]);
+
+  // Live Socket.IO listeners for real-time faults
+  useEffect(() => {
+    function onNewFault(newFault) {
+      if (!newFault) return;
+      if (selectedDeviceId && newFault.deviceId && newFault.deviceId !== selectedDeviceId) return;
+      setFaults((prev) => [newFault, ...prev.filter((f) => f._id !== newFault._id)]);
+    }
+
+    function onFaultResolved(resolvedFault) {
+      if (!resolvedFault) return;
+      setFaults((prev) =>
+        prev.map((f) => (f._id === resolvedFault._id ? { ...f, faultStatus: 'Resolved' } : f))
+      );
+    }
+
+    socket.on('new_fault', onNewFault);
+    socket.on('fault_resolved', onFaultResolved);
+
+    return () => {
+      socket.off('new_fault', onNewFault);
+      socket.off('fault_resolved', onFaultResolved);
+    };
+  }, [selectedDeviceId]);
+
+  const handleResolve = async (id) => {
+    try {
+      await resolveFaultLog(id);
+      fetchFaults();
+    } catch (err) {
+      console.error('Failed to resolve fault:', err);
+    }
+  };
+
+  return (
+    <div className="dash-card fault-logs-card">
+      <div className="fault-logs-header">
+        <div className="fault-logs-title-wrap">
+          <div className="fault-icon-badge">
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', margin: 0 }}>
+              Fault Logs & System Diagnostics
+            </h3>
+            <p style={{ fontSize: '11px', color: '#64748B', margin: '2px 0 0' }}>
+              Historical and active hardware fault records with timestamps
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={fetchFaults}
+          className="btn-secondary"
+          style={{ padding: '6px 12px', fontSize: '12px' }}
+          title="Refresh fault logs"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      {faults.length === 0 ? (
+        <div className="fault-empty-state">
+          <CheckCircle2 size={36} color="#10B981" style={{ margin: '0 auto 8px' }} />
+          <h4>No Fault Records Found</h4>
+          <p>All hardware controllers, motor drivers, and telemetry lines are operating normally.</p>
+        </div>
+      ) : (
+        <div className="dash-history-table-container">
+          <table className="dash-history-data-table">
+            <thead>
+              <tr>
+                <th style={{ width: '50px' }}>#</th>
+                <th>Device ID / Name</th>
+                <th>Fault Description</th>
+                <th style={{ width: '120px' }}>Fault Status</th>
+                <th style={{ width: '130px' }}>Date</th>
+                <th style={{ width: '110px' }}>Time</th>
+                <th style={{ width: '100px', textAlign: 'right' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {faults.map((f, idx) => {
+                const isActive = f.faultStatus === 'Active';
+                const formattedDate = f.date || new Date(f.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+                const formattedTime = f.time || new Date(f.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                return (
+                  <tr key={f._id || idx}>
+                    <td className="col-idx">{idx + 1}</td>
+                    <td>
+                      <span className="device-tag-code">{f.deviceId}</span>
+                      {f.deviceName && <span style={{ marginLeft: '6px', fontSize: '12px', color: '#64748B' }}>({f.deviceName})</span>}
+                    </td>
+                    <td style={{ fontWeight: 600, color: isActive ? '#B91C1C' : '#334155' }}>
+                      {f.faultDescription}
+                    </td>
+                    <td>
+                      <span className={isActive ? 'fault-status-active' : 'fault-status-resolved'}>
+                        {isActive ? 'Fault' : 'Resolved'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: '12px', color: '#64748B' }}>{formattedDate}</td>
+                    <td style={{ fontSize: '12px', color: '#64748B', fontFamily: 'monospace' }}>{formattedTime}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {isActive && (
+                        <button
+                          type="button"
+                          onClick={() => handleResolve(f._id)}
+                          style={{
+                            background: '#F1F5F9',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: '#0284C7',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Resolve
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ==========================================================================
    MAIN DASHBOARD COMPONENT (frontend/src/pages/Dashboard.jsx)
    ========================================================================== */
-const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
+const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onOpenProfile, onLogout }) => {
+  const isUserAdmin = currentUser && String(currentUser.role).toUpperCase() === 'ADMIN';
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [dashboardData, setDashboardData] = useState(null);
   const [powerHistory, setPowerHistory] = useState([]);
   const [motorHistory, setMotorHistory] = useState(null);
   const [chartRange, setChartRange] = useState('24h');
 
-  // Multi-device selection state: null = Show Registered Devices cards first
+  // Multi-device selection state: Persist in localStorage & URL params so refresh/reload stays inside the dashboard
   const [devices, setDevices] = useState([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [dashboardTab, setDashboardTab] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') === 'models') return 'models';
+      return 'devices';
+    } catch {
+      return 'devices';
+    }
+  });
+  const [activeModelFilter, setActiveModelFilter] = useState('ALL');
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlId = params.get('deviceId') || params.get('device');
+      if (urlId) return urlId;
+      return localStorage.getItem('wt_selected_device_id') || null;
+    } catch {
+      return null;
+    }
+  });
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [hasPendingDevices, setHasPendingDevices] = useState(false);
+  const [pendingDeviceList, setPendingDeviceList] = useState([]);
+
+  // Synchronize dashboard tab with URL params
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (dashboardTab === 'models') {
+        url.searchParams.set('tab', 'models');
+      } else {
+        url.searchParams.delete('tab');
+      }
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // Ignore URL sync error
+    }
+  }, [dashboardTab]);
+
+  // Handle model chosen from Models tab
+  const handleModelSelectedFromDashboard = (model) => {
+    const matchingDevice = devices.find((d) => d.modelNumber === model.modelNumber);
+    if (matchingDevice) {
+      handleSelectDevice(matchingDevice.deviceId);
+      setDashboardTab('devices');
+    } else {
+      setActiveModelFilter(model.modelNumber);
+      setSelectedDeviceId(null);
+      setDashboardTab('devices');
+    }
+  };
+
+  // Synchronize selectedDeviceId with localStorage and URL search params
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (selectedDeviceId) {
+        localStorage.setItem('wt_selected_device_id', selectedDeviceId);
+        if (url.searchParams.get('deviceId') !== selectedDeviceId) {
+          url.searchParams.set('deviceId', selectedDeviceId);
+          window.history.replaceState({ deviceId: selectedDeviceId }, '', url.toString());
+        }
+      } else {
+        localStorage.removeItem('wt_selected_device_id');
+        if (url.searchParams.has('deviceId') || url.searchParams.has('device')) {
+          url.searchParams.delete('deviceId');
+          url.searchParams.delete('device');
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    } catch (err) {
+      console.error('Error synchronizing selectedDeviceId:', err);
+    }
+  }, [selectedDeviceId]);
 
   // Fetch registered devices list with their latest telemetry data
   const fetchDevices = useCallback(async () => {
@@ -1302,14 +2032,39 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
     try {
       const res = await getDevices();
       if (res.data?.success && Array.isArray(res.data.data)) {
-        setDevices(res.data.data);
+        const fetchedList = res.data.data;
+        setDevices(fetchedList);
+
+        // For standard users, auto-select their first assigned device so they land straight on their live dashboard
+        if (!isUserAdmin) {
+          if (fetchedList.length === 0) {
+            setSelectedDeviceId(null);
+            try {
+              localStorage.removeItem('wt_selected_device_id');
+            } catch {}
+            // Check if user has registered devices pending approval by admin
+            try {
+              const pendingRes = await getDevices({ includePending: 'true' });
+              if (pendingRes.data?.success && Array.isArray(pendingRes.data.data)) {
+                const pendingOnly = pendingRes.data.data.filter((d) => d.approvalStatus === 'PENDING');
+                setHasPendingDevices(pendingOnly.length > 0);
+                setPendingDeviceList(pendingOnly);
+              }
+            } catch (pErr) {
+              console.warn('Could not check pending devices for dashboard:', pErr.message);
+            }
+          } else if (!selectedDeviceId || !fetchedList.some((d) => d.deviceId === selectedDeviceId)) {
+            setSelectedDeviceId(fetchedList[0].deviceId);
+            setHasPendingDevices(false);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to fetch devices for dashboard:', err.message);
     } finally {
       setLoadingDevices(false);
     }
-  }, []);
+  }, [isUserAdmin, selectedDeviceId]);
 
   useEffect(() => {
     fetchDevices();
@@ -1400,6 +2155,14 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
   const handleSelectDevice = (devId) => {
     if (!devId) return;
     setSelectedDeviceId(devId);
+    try {
+      localStorage.setItem('wt_selected_device_id', devId);
+      const url = new URL(window.location.href);
+      url.searchParams.set('deviceId', devId);
+      window.history.replaceState({ deviceId: devId }, '', url.toString());
+    } catch (e) {
+      console.error('Failed to save selected device:', e);
+    }
     refreshDashboard(devId);
     loadPowerHistory(chartRange, devId);
     loadMotorConsumption(devId);
@@ -1407,6 +2170,15 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
 
   const handleBackToDevices = () => {
     setSelectedDeviceId(null);
+    try {
+      localStorage.removeItem('wt_selected_device_id');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('deviceId');
+      url.searchParams.delete('device');
+      window.history.replaceState({}, '', url.toString());
+    } catch (e) {
+      console.error('Failed to clear selected device:', e);
+    }
     fetchDevices();
   };
 
@@ -1455,38 +2227,53 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
 
       setDashboardData((prev) => {
         const base = prev || {
-          powerMetrics: { voltage: 0, current: 0, power: 0, powerFactor: 0 },
-          waterTank: { levelPercentage: 0, capacityLiters: 1000, currentLiters: 0 },
+          powerMetrics: { voltage: null, current: null, power: null, powerFactor: null },
+          waterTank: { levelPercentage: null, capacityLiters: null, currentLiters: null },
           motor: { motorStatus: 'OFF' },
           energy: { totalKwh: 0, todayKwh: 0, monthlyKwh: 0 },
         };
 
-        const cap = telemetry.tankCapacity !== undefined 
-          ? Number(telemetry.tankCapacity) 
-          : (base.waterTank?.capacityLiters || 1000);
-        const con = telemetry.waterConsumption !== undefined 
-          ? Number(telemetry.waterConsumption) 
-          : (telemetry.waterLevel !== undefined ? Math.round((telemetry.waterLevel / 100) * cap) : (base.waterTank?.currentLiters || 0));
-        const newWaterLevel = telemetry.waterLevel !== undefined 
-          ? telemetry.waterLevel 
-          : (cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : (base.waterTank?.levelPercentage || 0));
+        const cap = telemetry.tankCapacity !== undefined
+          ? (telemetry.tankCapacity !== null ? Number(telemetry.tankCapacity) : null)
+          : (base.waterTank?.capacityLiters ?? null);
+        const con = telemetry.waterConsumption !== undefined
+          ? (telemetry.waterConsumption !== null ? Number(telemetry.waterConsumption) : null)
+          : (telemetry.waterLevel !== undefined && cap ? Math.round((telemetry.waterLevel / 100) * cap) : (base.waterTank?.currentLiters ?? null));
+        let newWaterLevel = telemetry.waterLevel !== undefined
+          ? (telemetry.waterLevel !== null ? Number(telemetry.waterLevel) : null)
+          : (cap && con !== null && cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : (base.waterTank?.levelPercentage ?? null));
 
+        const wlStatus = telemetry.waterLevelStatus || (newWaterLevel !== null ? (newWaterLevel < 25 ? 'Low' : newWaterLevel > 75 ? 'High' : 'Medium') : null);
         const newMotorStatus = telemetry.motorStatus || base.motor?.motorStatus || 'OFF';
 
         return {
           ...base,
+          hasData: true,
           powerMetrics: {
-            voltage: telemetry.voltage !== undefined ? telemetry.voltage : base.powerMetrics?.voltage || 0,
-            current: telemetry.current !== undefined ? telemetry.current : base.powerMetrics?.current || 0,
-            power: telemetry.power !== undefined ? telemetry.power : base.powerMetrics?.power || 0,
-            powerFactor: telemetry.powerFactor !== undefined ? telemetry.powerFactor : base.powerMetrics?.powerFactor || 0,
+            voltage: telemetry.voltage !== undefined ? telemetry.voltage : base.powerMetrics?.voltage,
+            current: telemetry.current !== undefined ? telemetry.current : base.powerMetrics?.current,
+            vol1: telemetry.vol1 !== undefined ? telemetry.vol1 : base.powerMetrics?.vol1,
+            vol2: telemetry.vol2 !== undefined ? telemetry.vol2 : base.powerMetrics?.vol2,
+            vol3: telemetry.vol3 !== undefined ? telemetry.vol3 : base.powerMetrics?.vol3,
+            cu1: telemetry.cu1 !== undefined ? telemetry.cu1 : base.powerMetrics?.cu1,
+            cu2: telemetry.cu2 !== undefined ? telemetry.cu2 : base.powerMetrics?.cu2,
+            cu3: telemetry.cu3 !== undefined ? telemetry.cu3 : base.powerMetrics?.cu3,
+            power: telemetry.power !== undefined ? telemetry.power : base.powerMetrics?.power,
+            powerFactor: telemetry.powerFactor !== undefined ? telemetry.powerFactor : base.powerMetrics?.powerFactor,
+            frequency: telemetry.frequency !== undefined ? telemetry.frequency : base.powerMetrics?.frequency,
+            energy: (telemetry.energyConsumption !== undefined ? telemetry.energyConsumption : telemetry.energy) !== undefined
+              ? (telemetry.energyConsumption !== undefined ? telemetry.energyConsumption : telemetry.energy)
+              : base.powerMetrics?.energy,
           },
           waterTank: {
             ...base.waterTank,
             levelPercentage: newWaterLevel,
             capacityLiters: cap,
             currentLiters: con,
-            status: newWaterLevel < 25 ? 'LOW' : newWaterLevel > 85 ? 'FULL' : 'NORMAL',
+            waterLevelStatus: wlStatus,
+            sumpTank: telemetry.sumpTank !== undefined ? telemetry.sumpTank : base.waterTank?.sumpTank,
+            overheadTank: telemetry.overheadTank !== undefined ? telemetry.overheadTank : base.waterTank?.overheadTank,
+            status: newWaterLevel !== null ? (newWaterLevel < 25 ? 'LOW' : newWaterLevel > 85 ? 'FULL' : 'NORMAL') : null,
           },
           motor: {
             ...base.motor,
@@ -1579,14 +2366,25 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
   const powerMetrics = dashboardData?.powerMetrics || {
     voltage: null,
     current: null,
+    vol1: null,
+    vol2: null,
+    vol3: null,
+    cu1: null,
+    cu2: null,
+    cu3: null,
     power: null,
     powerFactor: null,
+    frequency: null,
+    energy: null,
   };
 
   const waterTank = dashboardData?.waterTank || {
     levelPercentage: null,
-    capacityLiters: 1000,
+    capacityLiters: null,
     currentLiters: null,
+    waterLevelStatus: null,
+    sumpTank: null,
+    overheadTank: null,
   };
 
   const motorData = dashboardData?.motor || {
@@ -1605,11 +2403,13 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
     monthlyKwh: null,
   };
 
-  const selectedDevice = devices.find((d) => d.deviceId === selectedDeviceId) || dashboardData?.device;
+  const isApprovedDevice = devices.some((d) => d.deviceId === selectedDeviceId);
+  const activeSelectedDeviceId = (!isUserAdmin && !isApprovedDevice) ? null : selectedDeviceId;
+  const selectedDevice = devices.find((d) => d.deviceId === activeSelectedDeviceId) || (isUserAdmin ? dashboardData?.device : null);
 
   return (
     <div className="dashboard-wrapper">
-      <Sidebar currentPage="dashboard" onNavigate={onNavigate} onLogout={onLogout} />
+      <Sidebar currentPage="dashboard" onNavigate={onNavigate} onLogout={onLogout} currentUser={currentUser} onOpenProfile={onOpenProfile} />
 
       <main className="main-content">
         <Navbar
@@ -1617,6 +2417,7 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
           onNavigate={onNavigate}
           currentUser={currentUser}
           onOpenAuth={onOpenAuth}
+          onOpenProfile={onOpenProfile}
           onLogout={onLogout}
           onRefresh={() => {
             fetchDevices();
@@ -1628,113 +2429,226 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
           }}
         />
 
-        {/* VIEW 1: REGISTERED DEVICES FIRST (When no device is currently clicked) */}
-        {!selectedDeviceId ? (
+        {/* VIEW 1: REGISTERED DEVICES FIRST (When no device is currently clicked or approved) */}
+        {!activeSelectedDeviceId ? (
           <div className="registered-devices-screen">
-            {loadingDevices && devices.length === 0 ? (
-              <div className="dash-card devices-loading-state">
-                <Loader2 size={32} className="animate-spin" />
-                <p>Loading registered devices...</p>
-              </div>
-            ) : devices.length === 0 ? (
-              <div className="dash-card empty-devices-card">
-                <Cpu size={48} className="empty-icon" />
-                <h3>No Registered Devices Found</h3>
-                <p>Register your first hardware controller to begin receiving real-time water tank and power metrics.</p>
+            {/* Dashboard Subtabs Navigation: Registered Devices (Motor Models for Admin only) */}
+            {isUserAdmin && (
+              <div className="dash-tabs-nav-bar">
                 <button
                   type="button"
-                  className="btn-primary"
-                  onClick={() => onNavigate('devices')}
+                  className={`dash-tab-nav-btn ${dashboardTab === 'devices' ? 'active' : ''}`}
+                  onClick={() => setDashboardTab('devices')}
                 >
-                  <Plus size={16} /> Register First Device
+                  <Cpu size={16} />
+                  <span>Registered Devices</span>
+                  <span className="dash-tab-badge">{devices.length}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`dash-tab-nav-btn ${dashboardTab === 'models' ? 'active' : ''}`}
+                  onClick={() => setDashboardTab('models')}
+                >
+                  <Layers size={16} />
+                  <span>Motor Models</span>
+                  <span className="dash-tab-badge badge-models">4</span>
                 </button>
               </div>
+            )}
+
+            {isUserAdmin && dashboardTab === 'models' ? (
+              <Models
+                embedMode={true}
+                currentUser={currentUser}
+                onNavigate={onNavigate}
+                onSelectModel={handleModelSelectedFromDashboard}
+              />
             ) : (
-              <div className="registered-devices-main-grid">
-                {devices.map((dev) => {
-                  const telemetry = dev.data;
-                  const hasTelemetry = Boolean(telemetry && (telemetry.waterLevel !== null || telemetry.voltage !== null || telemetry.power !== null));
-                  const isOnline = dev.status === 'ONLINE' && hasTelemetry;
-                  const isMotorRunning = hasTelemetry && telemetry?.motorStatus === 'ON';
-                  const wl = hasTelemetry && telemetry?.waterLevel !== undefined && telemetry?.waterLevel !== null ? telemetry.waterLevel : null;
-                  const powerVal = hasTelemetry && telemetry?.power !== undefined && telemetry?.power !== null ? Math.round(telemetry.power) : null;
-                  const volVal = hasTelemetry && telemetry?.waterConsumption !== undefined && telemetry?.waterConsumption !== null ? telemetry.waterConsumption : null;
-
-                  return (
-                    <div
-                      key={dev.deviceId}
-                      className="registered-device-hub-card"
-                      onClick={() => handleSelectDevice(dev.deviceId)}
-                      role="button"
-                      tabIndex={0}
+              <>
+                {/* Optional Model Filter Indicator */}
+                {activeModelFilter !== 'ALL' && (
+                  <div className="model-filter-indicator-bar">
+                    <span>
+                      Filtered by Model: <strong>{activeModelFilter}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-clear-model-filter"
+                      onClick={() => setActiveModelFilter('ALL')}
                     >
-                      {/* Card Top */}
-                      <div className="hub-card-top">
-                        <span className="hub-device-id">{dev.deviceId}</span>
-                        <span className={`hub-status-pill ${hasTelemetry ? (isOnline ? 'online' : 'offline') : 'no-data'}`}>
-                          <span className="status-dot"></span>
-                          {hasTelemetry ? (dev.status || 'ONLINE') : 'NO DATA'}
-                        </span>
-                      </div>
+                      Clear Filter (Show All Devices)
+                    </button>
+                  </div>
+                )}
 
-                      {/* Title & Location */}
-                      <h3 className="hub-device-name" title={dev.name}>{dev.name}</h3>
-                      <div className="hub-device-location">
-                        <MapPin size={13} className="loc-pin" />
-                        <span>{dev.location}</span>
-                      </div>
-
-                      {/* Live Telemetry Preview Stats */}
-                      <div className="hub-telemetry-preview">
-                        <div className="hub-telemetry-item">
-                          <span className="hub-telemetry-label">Water Level</span>
-                          <span className="hub-telemetry-val">
-                            <Droplet size={14} className="water-icon" />
-                            <strong>{wl !== null ? `${wl}%` : '-'}</strong>
-                          </span>
-                        </div>
-                        <div className="hub-telemetry-item">
-                          <span className="hub-telemetry-label">Motor</span>
-                          <span className={`hub-telemetry-val ${hasTelemetry ? `motor-${isMotorRunning ? 'on' : 'off'}` : 'motor-nodata'}`}>
-                            <Power size={13} />
-                            <strong>{hasTelemetry && telemetry?.motorStatus ? (isMotorRunning ? 'RUNNING' : 'STOPPED') : '-'}</strong>
-                          </span>
-                        </div>
-                        <div className="hub-telemetry-item">
-                          <span className="hub-telemetry-label">Power</span>
-                          <span className="hub-telemetry-val">
-                            <Zap size={13} className="power-icon" />
-                            <strong>{powerVal !== null ? `${powerVal} W` : '-'}</strong>
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Tank level progress bar */}
-                      <div className="hub-tank-bar-wrap">
-                        <div className="hub-tank-bar-bg">
-                          <div
-                            className="hub-tank-bar-fill"
-                            style={{
-                              width: wl !== null ? `${Math.min(100, Math.max(0, wl))}%` : '0%',
-                              background: wl === null ? '#CBD5E1' : (wl < 25 ? '#EF4444' : wl > 85 ? '#00A896' : '#0284C7'),
-                            }}
-                          />
-                        </div>
-                        <div className="hub-tank-cap-row">
-                          <span>Volume: {volVal !== null ? `${volVal} L` : '-'}</span>
-                          <span>Cap: {dev.tankCapacity ? `${dev.tankCapacity} L` : '-'}</span>
-                        </div>
-                      </div>
-
-                      {/* Action CTA */}
-                      <div className="hub-card-action">
-                        <span>{hasTelemetry ? 'View Telemetry & Controls' : 'View Device (Awaiting Data)'}</span>
-                        <ChevronRight size={16} className="arrow-icon" />
-                      </div>
+                {loadingDevices && devices.length === 0 ? (
+                  <div className="dash-card devices-loading-state">
+                    <Loader2 size={32} className="animate-spin" />
+                    <p>Loading registered devices...</p>
+                  </div>
+                ) : (activeModelFilter === 'ALL' ? devices : devices.filter((d) => d.modelNumber === activeModelFilter)).length === 0 ? (
+                  !isUserAdmin && hasPendingDevices ? (
+                    <div className="dash-card empty-devices-card" style={{ border: '1.5px solid #FDE68A', background: '#FFFDF5' }}>
+                      <Clock size={48} style={{ color: '#D97706', margin: '0 auto 12px' }} />
+                      <h3 style={{ color: '#B45309' }}>Pending Approval by Admin</h3>
+                      <p style={{ maxWidth: '520px', margin: '0 auto 16px', color: '#78350F' }}>
+                        You registered device <strong>{pendingDeviceList.map((d) => d.deviceId).join(', ')}</strong>. It is currently <strong>pending approval by Admin</strong>. Once approved by admin, this device will be added and your live dashboard, tank levels, and history will show automatically.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => onNavigate('devices')}
+                        style={{ background: 'linear-gradient(135deg, #D97706 0%, #B45309 100%)' }}
+                      >
+                        <Clock size={16} /> View Device Status
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
+                  ) : (
+                    <div className="dash-card empty-devices-card">
+                      <Cpu size={48} className="empty-icon" />
+                      <h3>
+                        {!isUserAdmin
+                          ? 'No Registered Devices Found'
+                          : activeModelFilter !== 'ALL'
+                          ? `No Devices Registered Under Model ${activeModelFilter}`
+                          : 'No Registered Devices Found'}
+                      </h3>
+                      <p>
+                        {!isUserAdmin
+                          ? 'You have not registered any IoT tank devices yet. Register your administrator-provided Device ID to start monitoring.'
+                          : activeModelFilter !== 'ALL'
+                          ? `Register a new hardware device with model ${activeModelFilter} to begin monitoring.`
+                          : 'Register your first hardware controller to begin receiving real-time water tank and power metrics.'}
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => onNavigate('devices')}
+                      >
+                        <Plus size={16} /> {!isUserAdmin ? 'Register a Device ID' : 'Register Device'}
+                      </button>
+                    </div>
+                  )
+                ) : (
+                  <div className="registered-devices-main-grid">
+                    {(activeModelFilter === 'ALL' ? devices : devices.filter((d) => d.modelNumber === activeModelFilter)).map((dev) => {
+                      const telemetry = dev.data;
+                      const hasTelemetry = Boolean(telemetry && (telemetry.waterLevel !== null || telemetry.voltage !== null || telemetry.power !== null));
+                      const isOnline = dev.status === 'ONLINE' && hasTelemetry;
+                      const isMotorRunning = hasTelemetry && telemetry?.motorStatus === 'ON';
+                      const wl = hasTelemetry && telemetry?.waterLevel !== undefined && telemetry?.waterLevel !== null ? telemetry.waterLevel : null;
+                      const powerVal = hasTelemetry && telemetry?.power !== undefined && telemetry?.power !== null ? Math.round(telemetry.power) : null;
+                      const volVal = hasTelemetry && telemetry?.waterConsumption !== undefined && telemetry?.waterConsumption !== null ? telemetry.waterConsumption : null;
+
+                      return (
+                        <div
+                          key={dev.deviceId}
+                          className="registered-device-hub-card"
+                          onClick={() => handleSelectDevice(dev.deviceId)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          {/* Card Top */}
+                          <div className="hub-card-top">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span className="hub-device-id">{dev.deviceId}</span>
+                              {dev.modelNumber && (
+                                <span
+                                  style={{
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    background: '#EFF6FF',
+                                    color: '#0284C7',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #BFDBFE',
+                                  }}
+                                >
+                                  {dev.modelNumber}
+                                </span>
+                              )}
+                            </div>
+                            {(() => {
+                              const isFault = dev.status === 'Fault' || dev.deviceStatus === 'Fault';
+                              if (isFault) {
+                                return (
+                                  <span className="hub-status-pill fault" title={dev.faultDescription || 'Fault condition reported'}>
+                                    <span className="status-dot"></span>
+                                    FAULT
+                                  </span>
+                                );
+                              }
+                              const isActive = dev.status === 'Active' || dev.deviceStatus === 'Active' || isOnline;
+                              return (
+                                <span className={`hub-status-pill ${hasTelemetry || isActive ? 'active' : 'no-data'}`}>
+                                  <span className="status-dot"></span>
+                                  {hasTelemetry || isActive ? 'ACTIVE' : 'NO DATA'}
+                                </span>
+                              );
+                            })()}
+                          </div>
+
+                          {/* Title & Location */}
+                          <h3 className="hub-device-name" title={dev.name}>{dev.name}</h3>
+                          <div className="hub-device-location">
+                            <MapPin size={13} className="loc-pin" />
+                            <span>{dev.location}</span>
+                          </div>
+
+                          {/* Live Telemetry Preview Stats */}
+                          <div className="hub-telemetry-preview">
+                            <div className="hub-telemetry-item">
+                              <span className="hub-telemetry-label">Water Level</span>
+                              <span className="hub-telemetry-val">
+                                <Droplet size={14} className="water-icon" />
+                                <strong>{wl !== null ? `${wl}%` : '-'}</strong>
+                              </span>
+                            </div>
+                            <div className="hub-telemetry-item">
+                              <span className="hub-telemetry-label">Motor</span>
+                              <span className={`hub-telemetry-val ${hasTelemetry ? `motor-${isMotorRunning ? 'on' : 'off'}` : 'motor-nodata'}`}>
+                                <Power size={13} />
+                                <strong>{hasTelemetry && telemetry?.motorStatus ? (isMotorRunning ? 'RUNNING' : 'STOPPED') : '-'}</strong>
+                              </span>
+                            </div>
+                            <div className="hub-telemetry-item">
+                              <span className="hub-telemetry-label">Power</span>
+                              <span className="hub-telemetry-val">
+                                <Zap size={13} className="power-icon" />
+                                <strong>{powerVal !== null ? `${powerVal} W` : '-'}</strong>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Tank level progress bar */}
+                          <div className="hub-tank-bar-wrap">
+                            <div className="hub-tank-bar-bg">
+                              <div
+                                className="hub-tank-bar-fill"
+                                style={{
+                                  width: wl !== null ? `${Math.min(100, Math.max(0, wl))}%` : '0%',
+                                  background: wl === null ? '#CBD5E1' : (wl < 25 ? '#EF4444' : wl > 85 ? '#00A896' : '#0284C7'),
+                                }}
+                              />
+                            </div>
+                            <div className="hub-tank-cap-row">
+                              <span>Volume: {volVal !== null ? `${volVal} L` : '-'}</span>
+                              <span>Cap: {dev.tankCapacity ? `${dev.tankCapacity} L` : '-'}</span>
+                            </div>
+                          </div>
+
+                          {/* Action CTA */}
+                          <div className="hub-card-action">
+                            <span>{hasTelemetry ? 'View Telemetry & Controls' : 'View Device (Awaiting Data)'}</span>
+                            <ChevronRight size={16} className="arrow-icon" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -1743,20 +2657,54 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
             {/* Top Navigation Banner with Back Button */}
             <div className="dash-card device-view-header-bar">
               <div className="device-view-back-group">
-                <button
-                  type="button"
-                  className="btn-back-to-devices"
-                  onClick={handleBackToDevices}
-                  title="Return to Registered Devices Cards"
-                >
-                  <ArrowLeft size={16} />
-                  <span>All Devices</span>
-                </button>
+                {(isUserAdmin || devices.length > 1) && (
+                  <button
+                    type="button"
+                    className="btn-back-to-devices"
+                    onClick={handleBackToDevices}
+                    title="Return to Devices List"
+                  >
+                    <ArrowLeft size={16} />
+                    <span>{isUserAdmin ? 'All Devices' : 'My Devices'}</span>
+                  </button>
+                )}
+
+                {isUserAdmin && (
+                  <button
+                    type="button"
+                    className="btn-back-to-devices"
+                    onClick={() => {
+                      setSelectedDeviceId(null);
+                      setDashboardTab('models');
+                    }}
+                    title="View and Manage Motor Models"
+                  >
+                    <Layers size={15} />
+                    <span>Models</span>
+                  </button>
+                )}
 
                 <div className="device-view-divider" />
 
                 <div className="device-view-active-title">
                   <span className="active-id-chip">{selectedDeviceId}</span>
+                  {selectedDevice?.modelNumber && (
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: '#EFF6FF',
+                        color: '#0284C7',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #BFDBFE',
+                        letterSpacing: '0.3px',
+                      }}
+                      title={`Standardized Model: ${selectedDevice.modelNumber}`}
+                    >
+                      {selectedDevice.modelNumber}
+                    </span>
+                  )}
                   <h2 className="active-device-title">
                     {selectedDevice?.name || 'WaterTank Controller'}
                   </h2>
@@ -1800,11 +2748,20 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
               <Header
                 motorStatus={motorData.motorStatus}
                 waterLevel={waterTank.levelPercentage}
+                waterLevelStatus={waterTank.waterLevelStatus}
                 selectedDeviceId={selectedDeviceId}
+                selectedDevice={selectedDevice}
                 hasData={hasData}
                 onMotorStateChanged={handleMotorStateChanged}
               />
-              <PowerMetricsCard metrics={powerMetrics} hasData={hasData} />
+              <PowerMetricsCard
+                metrics={{
+                  ...powerMetrics,
+                  energy: powerMetrics.energy ?? dashboardData?.energy?.totalKwh ?? null,
+                }}
+                modelNumber={selectedDevice?.modelNumber}
+                hasData={hasData}
+              />
             </div>
 
             <div className="dashboard-middle-row">
@@ -1817,6 +2774,10 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                 waterLevel={waterTank.levelPercentage}
                 capacityLiters={waterTank.capacityLiters}
                 currentLiters={waterTank.currentLiters}
+                waterLevelStatus={waterTank.waterLevelStatus}
+                sumpTank={waterTank.sumpTank}
+                overheadTank={waterTank.overheadTank}
+                modelNumber={selectedDevice?.modelNumber}
                 hasData={hasData}
               />
             </div>
@@ -1851,6 +2812,11 @@ const Dashboard = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
             <DashboardHistoryTable
               selectedDeviceId={selectedDeviceId}
               hasData={hasData}
+            />
+
+            {/* 10. Dedicated Fault Logs & Diagnostics Section */}
+            <FaultLogsSection
+              selectedDeviceId={selectedDeviceId}
             />
           </div>
         )}

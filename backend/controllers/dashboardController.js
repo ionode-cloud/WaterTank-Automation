@@ -5,18 +5,92 @@ const iotService = require('../services/iotService');
 exports.getDashboardOverview = async (req, res) => {
   try {
     const requestedDeviceId = req.query.deviceId ? String(req.query.deviceId).trim().toUpperCase() : null;
+    const isUserRegular = req.user && String(req.user.role).toUpperCase() !== 'ADMIN';
 
-    // Find device info if requested
+    // Find device info if requested, scoped to user if regular user
     let deviceDoc = null;
     let targetDeviceId = requestedDeviceId;
 
-    if (targetDeviceId) {
-      deviceDoc = await Device.findOne({ deviceId: targetDeviceId });
-    } else {
-      // Default to first registered device
-      deviceDoc = await Device.findOne().sort({ createdAt: 1 });
+    if (isUserRegular) {
+      const Device = require('../models/Device');
+      const approvedFilter = {
+        assignedUserId: req.user._id,
+        $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+      };
+
+      if (targetDeviceId) {
+        deviceDoc = await Device.findOne({ deviceId: targetDeviceId, ...approvedFilter });
+      }
+      if (!deviceDoc) {
+        deviceDoc = await Device.findOne(approvedFilter).sort({ createdAt: 1 });
+      }
       if (deviceDoc) {
         targetDeviceId = deviceDoc.deviceId;
+      } else {
+        // Regular user has no approved devices yet
+        return res.status(200).json({
+          success: true,
+          data: {
+            device: null,
+            system: {
+              name: 'WaterTank System',
+              status: 'STANDBY',
+              timestamp: new Date(),
+              isHardwareConnected: false,
+            },
+            hasData: false,
+            isUserEmpty: true,
+            message: 'No approved device has been assigned to your account yet. If you have registered a device ID, it is pending administrator approval.',
+            powerMetrics: {
+              voltage: null,
+              current: null,
+              vol1: null,
+              vol2: null,
+              vol3: null,
+              cu1: null,
+              cu2: null,
+              cu3: null,
+              power: null,
+              powerFactor: null,
+              frequency: 50.0,
+              energy: null,
+            },
+            waterTank: {
+              levelPercentage: null,
+              capacityLiters: 1000,
+              currentLiters: null,
+              tankCapacity: 1000,
+              waterConsumption: null,
+              waterLevelStatus: null,
+              sumpTank: null,
+              overheadTank: null,
+              status: 'AWAITING_DATA',
+            },
+            motor: {
+              motorStatus: null,
+              currentOnDuration: 0,
+              currentOffDuration: 0,
+              totalOnDurationSeconds: 0,
+              totalOffDurationSeconds: 0,
+            },
+            energy: {
+              totalKwh: null,
+              todayKwh: null,
+              monthlyKwh: null,
+            },
+          },
+        });
+      }
+    } else {
+      // Admin / anonymous overview
+      if (targetDeviceId) {
+        deviceDoc = await Device.findOne({ deviceId: targetDeviceId });
+      } else {
+        // Default to first registered device
+        deviceDoc = await Device.findOne().sort({ createdAt: 1 });
+        if (deviceDoc) {
+          targetDeviceId = deviceDoc.deviceId;
+        }
       }
     }
 
@@ -49,15 +123,26 @@ exports.getDashboardOverview = async (req, res) => {
           powerMetrics: {
             voltage: null,
             current: null,
+            vol1: null,
+            vol2: null,
+            vol3: null,
+            cu1: null,
+            cu2: null,
+            cu3: null,
             power: null,
             powerFactor: null,
+            frequency: 50.0,
+            energy: null,
           },
           waterTank: {
             levelPercentage: null,
-            capacityLiters: deviceDoc?.tankCapacity || 1000,
+            capacityLiters: deviceDoc?.tankCapacity || null,
             currentLiters: null,
-            tankCapacity: deviceDoc?.tankCapacity || 1000,
+            tankCapacity: deviceDoc?.tankCapacity || null,
             waterConsumption: null,
+            waterLevelStatus: null,
+            sumpTank: null,
+            overheadTank: null,
             status: 'AWAITING_DATA',
           },
           motor: {
@@ -80,22 +165,33 @@ exports.getDashboardOverview = async (req, res) => {
     const activeState = latestRecord ? {
       voltage: latestRecord.voltage,
       current: latestRecord.current,
+      vol1: latestRecord.vol1,
+      vol2: latestRecord.vol2,
+      vol3: latestRecord.vol3,
+      cu1: latestRecord.cu1,
+      cu2: latestRecord.cu2,
+      cu3: latestRecord.cu3,
       power: latestRecord.power,
       powerFactor: latestRecord.powerFactor,
-      tankCapacity: latestRecord.tankCapacity || deviceDoc?.tankCapacity || 1000,
+      frequency: latestRecord.frequency !== undefined && latestRecord.frequency !== null ? latestRecord.frequency : 50.0,
+      tankCapacity: latestRecord.tankCapacity || deviceDoc?.tankCapacity || null,
       waterConsumption: latestRecord.waterConsumption || 0,
+      waterLevelStatus: latestRecord.waterLevelStatus || null,
+      sumpTank: latestRecord.sumpTank || null,
+      overheadTank: latestRecord.overheadTank || null,
       motorStatus: latestRecord.motorStatus || 'OFF',
       energyConsumption: latestRecord.energyConsumption || 0,
       deviceId: latestRecord.deviceId || targetDeviceId,
     } : {
       ...runtimeState,
       deviceId: targetDeviceId,
-      tankCapacity: deviceDoc?.tankCapacity || runtimeState.tankCapacity || 1000,
+      tankCapacity: deviceDoc?.tankCapacity || runtimeState.tankCapacity || null,
+      frequency: runtimeState.frequency !== undefined && runtimeState.frequency !== null ? runtimeState.frequency : 50.0,
     };
 
-    const cap = activeState.tankCapacity || 1000;
-    const con = activeState.waterConsumption || 0;
-    const levelPercentage = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : 0;
+    const cap = activeState.tankCapacity || null;
+    const con = activeState.waterConsumption !== undefined ? activeState.waterConsumption : null;
+    const levelPercentage = (cap && cap > 0 && con !== null) ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : (latestRecord?.waterLevel ?? (runtimeState?.waterLevel ?? null));
 
     const motorStats = await iotService.getMotorStats(targetDeviceId);
 
@@ -122,6 +218,8 @@ exports.getDashboardOverview = async (req, res) => {
       monthlyEnergy = +(totalEnergy).toFixed(2);
     }
 
+    const resolvedWlStatus = activeState.waterLevelStatus || (levelPercentage !== null ? (levelPercentage < 25 ? 'Low' : levelPercentage > 75 ? 'High' : 'Medium') : null);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -130,6 +228,7 @@ exports.getDashboardOverview = async (req, res) => {
           name: deviceDoc?.name || 'WaterTank Pump Controller',
           location: deviceDoc?.location || 'Main Tank',
           status: deviceDoc?.status || 'ONLINE',
+          deviceStatus: deviceDoc?.deviceStatus || (deviceDoc?.status === 'Fault' ? 'Fault' : 'Active'),
         },
         system: {
           name: deviceDoc?.name || 'WaterTank Automation',
@@ -141,8 +240,18 @@ exports.getDashboardOverview = async (req, res) => {
         powerMetrics: {
           voltage: activeState.voltage,
           current: activeState.current,
+          vol1: activeState.vol1 || null,
+          vol2: activeState.vol2 || null,
+          vol3: activeState.vol3 || null,
+          cu1: activeState.cu1 || null,
+          cu2: activeState.cu2 || null,
+          cu3: activeState.cu3 || null,
           power: activeState.power,
           powerFactor: activeState.powerFactor,
+          frequency: activeState.frequency !== undefined && activeState.frequency !== null ? activeState.frequency : 50.0,
+          energy: activeState.energyConsumption !== undefined && activeState.energyConsumption !== null
+            ? +Number(activeState.energyConsumption).toFixed(2)
+            : +totalEnergy.toFixed(2),
         },
         waterTank: {
           levelPercentage: levelPercentage,
@@ -150,7 +259,10 @@ exports.getDashboardOverview = async (req, res) => {
           currentLiters: con,
           tankCapacity: cap,
           waterConsumption: con,
-          status: levelPercentage < 25 ? 'LOW' : levelPercentage > 85 ? 'FULL' : 'NORMAL',
+          waterLevelStatus: resolvedWlStatus,
+          sumpTank: activeState.sumpTank || null,
+          overheadTank: activeState.overheadTank || null,
+          status: levelPercentage !== null ? (levelPercentage < 25 ? 'LOW' : levelPercentage > 85 ? 'FULL' : 'NORMAL') : null,
         },
         motor: {
           ...motorStats,

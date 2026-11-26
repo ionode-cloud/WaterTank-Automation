@@ -23,18 +23,36 @@ let runtimeState = {
 let deviceRuntimeStates = {};
 
 let ioInstance = null;
+let ackInterval = null;
 
 const setSocketIO = (io) => {
   ioInstance = io;
+  // Start the 1-second live acknowledgement emitter
+  if (!ackInterval) {
+    ackInterval = setInterval(() => {
+      if (ioInstance) {
+        ioInstance.emit('device_ack', {
+          status: 'Active',
+          acknowledgedAt: new Date().toISOString(),
+          serverTime: Date.now(),
+        });
+      }
+    }, 1000);
+  }
 };
+
+const getSocketIO = () => ioInstance;
 
 const initRuntimeStateFromDB = async () => {
   try {
     const latest = await SensorData.findOne().sort({ timestamp: -1 });
     if (latest) {
-      const cap = Number(latest.tankCapacity) || 1000;
-      const con = Number(latest.waterConsumption) || 0;
-      const lvl = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : (latest.waterLevel || 0);
+      const cap = latest.tankCapacity !== undefined && latest.tankCapacity !== null ? Number(latest.tankCapacity) : null;
+      const con = latest.waterConsumption !== undefined && latest.waterConsumption !== null ? Number(latest.waterConsumption) : null;
+      let lvl = latest.waterLevel !== undefined && latest.waterLevel !== null ? Number(latest.waterLevel) : null;
+      if (lvl === null && cap && con !== null && cap > 0) {
+        lvl = Math.min(100, Math.max(0, Math.round((con / cap) * 100)));
+      }
 
       runtimeState = {
         ...runtimeState,
@@ -43,11 +61,22 @@ const initRuntimeStateFromDB = async () => {
         tankCapacity: cap,
         waterConsumption: con,
         waterLevel: lvl,
-        voltage: latest.voltage || 0,
-        current: latest.current || 0,
-        power: latest.power || 0,
-        powerFactor: latest.powerFactor || 0,
+        waterLevelStatus: latest.waterLevelStatus || (lvl !== null ? (lvl < 25 ? 'Low' : lvl > 75 ? 'High' : 'Medium') : null),
+        voltage: latest.voltage !== undefined ? latest.voltage : null,
+        current: latest.current !== undefined ? latest.current : null,
+        vol1: latest.vol1 !== undefined ? latest.vol1 : null,
+        vol2: latest.vol2 !== undefined ? latest.vol2 : null,
+        vol3: latest.vol3 !== undefined ? latest.vol3 : null,
+        cu1: latest.cu1 !== undefined ? latest.cu1 : null,
+        cu2: latest.cu2 !== undefined ? latest.cu2 : null,
+        cu3: latest.cu3 !== undefined ? latest.cu3 : null,
+        power: latest.power !== undefined ? latest.power : null,
+        powerFactor: latest.powerFactor !== undefined ? latest.powerFactor : null,
+        frequency: latest.frequency !== undefined ? latest.frequency : null,
         energyConsumption: latest.energyConsumption || 0,
+        sumpTank: latest.sumpTank || null,
+        overheadTank: latest.overheadTank || null,
+        deviceStatus: latest.deviceStatus || 'Active',
       };
 
       if (latest.deviceId) {
@@ -69,7 +98,6 @@ const getRuntimeState = (deviceId) => {
     if (deviceRuntimeStates[cleanId]) {
       return { ...deviceRuntimeStates[cleanId] };
     }
-    // Return null if no telemetry has been recorded specifically for this device
     return null;
   }
   return { ...runtimeState };
@@ -83,31 +111,67 @@ const updateRuntimeState = (partial) => {
     lastOnTime: null,
     lastOffTime: null,
     currentOnDuration: 0,
-    tankCapacity: 1000,
-    waterConsumption: 0,
-    waterLevel: 0,
-    voltage: 0,
-    current: 0.0,
-    power: 0,
-    powerFactor: 0,
+    tankCapacity: null,
+    waterConsumption: null,
+    waterLevel: null,
+    waterLevelStatus: null,
+    sumpTank: null,
+    overheadTank: null,
+    voltage: null,
+    current: null,
+    vol1: null,
+    vol2: null,
+    vol3: null,
+    cu1: null,
+    cu2: null,
+    cu3: null,
+    power: null,
+    powerFactor: null,
+    frequency: null,
     energyConsumption: 0,
+    deviceStatus: 'Active',
     isHardwareConnected: true,
     hasData: true,
   };
 
-  if (partial.tankCapacity !== undefined || partial.waterConsumption !== undefined) {
-    const cap = partial.tankCapacity !== undefined ? Number(partial.tankCapacity) : (baseDeviceState.tankCapacity || 1000);
-    const con = partial.waterConsumption !== undefined ? Number(partial.waterConsumption) : (baseDeviceState.waterConsumption || 0);
-    partial.tankCapacity = cap;
-    partial.waterConsumption = con;
-    partial.waterLevel = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : 0;
+  // Derive water level & status if possible
+  const cap = partial.tankCapacity !== undefined ? (partial.tankCapacity !== null ? Number(partial.tankCapacity) : null) : baseDeviceState.tankCapacity;
+  const con = partial.waterConsumption !== undefined ? (partial.waterConsumption !== null ? Number(partial.waterConsumption) : null) : baseDeviceState.waterConsumption;
+  let lvl = partial.waterLevel !== undefined ? (partial.waterLevel !== null ? Number(partial.waterLevel) : null) : baseDeviceState.waterLevel;
+
+  if (lvl === null && cap && con !== null && cap > 0) {
+    lvl = Math.min(100, Math.max(0, Math.round((con / cap) * 100)));
   }
 
-  deviceRuntimeStates[cleanId] = { ...baseDeviceState, ...partial, deviceId: cleanId, hasData: true };
-  runtimeState = { ...runtimeState, ...partial, deviceId: cleanId, hasData: true };
+  // Derive waterLevelStatus if not explicitly provided
+  let lvlStatus = partial.waterLevelStatus || baseDeviceState.waterLevelStatus;
+  if (!lvlStatus && lvl !== null) {
+    lvlStatus = lvl < 25 ? 'Low' : lvl > 75 ? 'High' : 'Medium';
+  }
+
+  // Sump Tank & Overhead Tank handling
+  const sump = partial.sumpTank !== undefined ? partial.sumpTank : baseDeviceState.sumpTank;
+  const overhead = partial.overheadTank !== undefined ? partial.overheadTank : baseDeviceState.overheadTank;
+
+  const merged = {
+    ...baseDeviceState,
+    ...partial,
+    deviceId: cleanId,
+    tankCapacity: cap,
+    waterConsumption: con,
+    waterLevel: lvl,
+    waterLevelStatus: lvlStatus,
+    sumpTank: sump,
+    overheadTank: overhead,
+    hasData: true,
+    isHardwareConnected: true,
+  };
+
+  deviceRuntimeStates[cleanId] = merged;
+  runtimeState = merged;
 
   if (ioInstance) {
-    ioInstance.emit('sensor_update', deviceRuntimeStates[cleanId]);
+    ioInstance.emit('sensor_update', merged);
   }
 };
 
@@ -382,6 +446,7 @@ const executeMotorCommand = async (commandType, source = 'dashboard', deviceId =
 
 module.exports = {
   setSocketIO,
+  getSocketIO,
   initRuntimeStateFromDB,
   getRuntimeState,
   updateRuntimeState,

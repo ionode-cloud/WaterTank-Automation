@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import LandingPage from './pages/LandingPage';
 import Dashboard from './pages/Dashboard';
+import Profile from './pages/Profile';
+import Models from './pages/Models';
 import History from './pages/History';
 import Devices from './pages/Devices';
 import AdminConsole from './pages/AdminConsole';
+import RegisteredUsers from './pages/RegisteredUsers';
+import UserRegisteredDevices from './pages/UserRegisteredDevices';
 import AuthModal from './components/AuthModal';
 
-const VALID_PAGES = ['landing', 'dashboard', 'history', 'devices', 'admin'];
-const PROTECTED_PAGES = ['dashboard', 'history', 'devices', 'admin'];
+const VALID_PAGES = ['landing', 'profile', 'dashboard', 'models', 'history', 'devices', 'admin', 'registered-users', 'user-devices'];
+const PROTECTED_PAGES = ['profile', 'dashboard', 'models', 'history', 'devices', 'admin', 'registered-users', 'user-devices'];
 
 const getPageFromUrl = () => {
   // If an old hash exists (e.g. #dashboard), strip it
@@ -58,11 +62,26 @@ function App() {
 
     // If user is authenticated, check clean URL pathname
     const pageFromUrl = getPageFromUrl();
+    let userRole = 'USER';
+    try {
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        userRole = String(parsed.role || 'USER').toUpperCase();
+      }
+    } catch {}
+
+    const ADMIN_PAGES = ['admin', 'registered-users', 'user-devices', 'models'];
     if (pageFromUrl && VALID_PAGES.includes(pageFromUrl)) {
+      if (ADMIN_PAGES.includes(pageFromUrl) && userRole !== 'ADMIN') {
+        return 'dashboard';
+      }
       return pageFromUrl;
     }
     const saved = localStorage.getItem('wt_current_page');
     if (VALID_PAGES.includes(saved) && saved !== 'landing') {
+      if (ADMIN_PAGES.includes(saved) && userRole !== 'ADMIN') {
+        return 'dashboard';
+      }
       return saved;
     }
     return 'dashboard';
@@ -93,6 +112,27 @@ function App() {
       return;
     }
 
+    // Role-based route guard: Non-admins cannot access admin views (including Models)
+    const ADMIN_PAGES = ['admin', 'registered-users', 'user-devices', 'models'];
+    if (ADMIN_PAGES.includes(page)) {
+      let isUserAdmin = false;
+      try {
+        if (currentUser) {
+          isUserAdmin = String(currentUser.role).toUpperCase() === 'ADMIN';
+        } else if (stored) {
+          const parsed = JSON.parse(stored);
+          isUserAdmin = String(parsed.role || '').toUpperCase() === 'ADMIN';
+        }
+      } catch {}
+
+      if (!isUserAdmin) {
+        setCurrentPage('dashboard');
+        localStorage.setItem('wt_current_page', 'dashboard');
+        window.history.replaceState({ page: 'dashboard' }, '', '/dashboard');
+        return;
+      }
+    }
+
     setCurrentPage(page);
     localStorage.setItem('wt_current_page', page);
 
@@ -104,10 +144,8 @@ function App() {
     window.scrollTo(0, 0);
   }, []);
 
-  // Requirement: "after login show dashboard"
   const handleAuthSuccess = (user, token) => {
     setCurrentUser(user);
-    // As soon as user logs in or registers, immediately direct them to Dashboard
     handleNavigate('dashboard');
   };
 
@@ -155,8 +193,25 @@ function App() {
         setCurrentPage('landing');
         window.history.replaceState(null, '', '/');
       } else {
-        setCurrentPage(page);
-        localStorage.setItem('wt_current_page', page);
+        const ADMIN_PAGES = ['admin', 'registered-users', 'user-devices'];
+        let isUserAdmin = false;
+        try {
+          if (currentUser) {
+            isUserAdmin = String(currentUser.role).toUpperCase() === 'ADMIN';
+          } else if (currentStored) {
+            const parsed = JSON.parse(currentStored);
+            isUserAdmin = String(parsed.role || '').toUpperCase() === 'ADMIN';
+          }
+        } catch {}
+
+        if (ADMIN_PAGES.includes(page) && !isUserAdmin) {
+          setCurrentPage('dashboard');
+          localStorage.setItem('wt_current_page', 'dashboard');
+          window.history.replaceState(null, '', '/dashboard');
+        } else {
+          setCurrentPage(page);
+          localStorage.setItem('wt_current_page', page);
+        }
       }
     };
 
@@ -176,7 +231,18 @@ function App() {
         />
       )}
 
-      {/* 2. Main Dashboard (Shown after Login) */}
+      {/* 2. User Profile Tab (Normal Page View) */}
+      {currentPage === 'profile' && (
+        <Profile
+          onNavigate={handleNavigate}
+          currentUser={currentUser}
+          onOpenAuth={handleOpenAuth}
+          onLogout={handleLogout}
+          onProfileUpdated={(updated) => setCurrentUser(updated)}
+        />
+      )}
+
+      {/* 3. Main Dashboard (Shown after Login) */}
       {currentPage === 'dashboard' && (
         <Dashboard
           onNavigate={handleNavigate}
@@ -186,7 +252,17 @@ function App() {
         />
       )}
 
-      {/* 3. Devices Management */}
+      {/* 4. Motor Models Category Specifications */}
+      {currentPage === 'models' && (
+        <Models
+          onNavigate={handleNavigate}
+          currentUser={currentUser}
+          onOpenAuth={handleOpenAuth}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {/* 5. Devices Management */}
       {currentPage === 'devices' && (
         <Devices
           onNavigate={handleNavigate}
@@ -196,7 +272,7 @@ function App() {
         />
       )}
 
-      {/* 4. History Logs */}
+      {/* 6. History Logs */}
       {currentPage === 'history' && (
         <History
           onNavigate={handleNavigate}
@@ -206,9 +282,30 @@ function App() {
         />
       )}
 
-      {/* 5. Admin Console */}
+      {/* 7. Admin Console (Admin Credentials Only) */}
       {currentPage === 'admin' && (
         <AdminConsole
+          onNavigate={handleNavigate}
+          currentUser={currentUser}
+          onOpenAuth={handleOpenAuth}
+          onLogout={handleLogout}
+          currentPage="admin"
+        />
+      )}
+
+      {/* 8. Registered Users (Separate dedicated page) */}
+      {currentPage === 'registered-users' && (
+        <RegisteredUsers
+          onNavigate={handleNavigate}
+          currentUser={currentUser}
+          onOpenAuth={handleOpenAuth}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {/* 9. User Registered Devices (Separate dedicated page) */}
+      {currentPage === 'user-devices' && (
+        <UserRegisteredDevices
           onNavigate={handleNavigate}
           currentUser={currentUser}
           onOpenAuth={handleOpenAuth}

@@ -8,6 +8,14 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Name is required'],
       trim: true,
     },
+    username: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      lowercase: true,
+      description: 'Unique login username',
+    },
     email: {
       type: String,
       required: [true, 'Email address is required'],
@@ -30,13 +38,40 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'operator', 'viewer'],
-      default: 'admin',
+      enum: ['admin', 'operator', 'viewer', 'ADMIN', 'USER'],
+      default: 'USER',
+      description: 'System role: ADMIN or USER',
     },
     phone: {
       type: String,
       trim: true,
       default: '',
+    },
+    mobileNumber: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    googleId: {
+      type: String,
+      default: '',
+    },
+    picture: {
+      type: String,
+      default: '',
+    },
+    latitude: {
+      type: Number,
+      default: null,
+    },
+    longitude: {
+      type: Number,
+      default: null,
     },
     isActive: {
       type: Boolean,

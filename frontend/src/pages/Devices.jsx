@@ -18,24 +18,48 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
+  Droplet,
+  Droplets,
+  Zap,
+  Info,
+  Key,
+  Shield,
+  ExternalLink,
 } from 'lucide-react';
-import { getDevices, createDevice, updateDevice, deleteDevice } from '../services/api';
+import { getDevices, createDevice, updateDevice, deleteDevice, getModels, claimDeviceById } from '../services/api';
+import { socket } from '../services/socket';
+import { getAllModels, getModelConfig, MOTOR_MODELS } from '../config/motorModels';
 
-const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
+const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout, onOpenProfile }) => {
+  const isAdmin = Boolean(
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.isAdmin
+  );
+
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
-  // Top Row Inline Registration Form State
+  // Available Motor Models & Selected Model for Registration
+  const [availableModels, setAvailableModels] = useState(getAllModels());
+  const [selectedModel, setSelectedModel] = useState('SG-1PS-1.5');
+
+  // Registration Form State & Mode: 'create' for Admin | 'claim' for User
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState(isAdmin ? 'create' : 'claim');
   const [newDeviceId, setNewDeviceId] = useState('');
   const [newName, setNewName] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFormMode(isAdmin ? 'create' : 'claim');
+  }, [isAdmin]);
 
   // Inline Table Row Edit State
   const [editingId, setEditingId] = useState(null);
@@ -50,7 +74,7 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
   const fetchDevicesList = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getDevices();
+      const res = await getDevices({ includePending: 'true' });
       if (res.data?.success) {
         setDevices(res.data.data || []);
       }
@@ -61,9 +85,46 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
     }
   }, []);
 
+  // Fetch dynamic models list from backend
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        const res = await getModels();
+        if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+          setAvailableModels(res.data.data);
+        }
+      } catch (err) {
+        // Fallback to static models already initialized
+      }
+    }
+    loadModels();
+  }, []);
+
   useEffect(() => {
     fetchDevicesList();
   }, [fetchDevicesList]);
+
+  // Real-time device status update listener (Active vs Fault)
+  useEffect(() => {
+    function onDeviceStatusUpdate(update) {
+      if (!update?.deviceId) return;
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.deviceId === update.deviceId
+            ? {
+                ...d,
+                status: update.status || d.status,
+                deviceStatus: update.deviceStatus || update.status || d.deviceStatus,
+                faultDescription: update.faultDescription !== undefined ? update.faultDescription : d.faultDescription,
+              }
+            : d
+        )
+      );
+    }
+
+    socket.on('device_status_update', onDeviceStatusUpdate);
+    return () => socket.off('device_status_update', onDeviceStatusUpdate);
+  }, []);
 
   // Handle Create Device from Top Row Form
   const handleRegisterDevice = async (e) => {
@@ -75,6 +136,10 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
     const cleanName = newName.trim();
     const cleanLocation = newLocation.trim();
 
+    if (!selectedModel) {
+      setFormError('Please select a Motor Model for this device');
+      return;
+    }
     if (!cleanId) {
       setFormError('Please enter a Device ID (e.g. WT-001)');
       return;
@@ -88,25 +153,81 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
       return;
     }
 
+    const modelCfg = getModelConfig(selectedModel) || availableModels.find((m) => m.modelNumber === selectedModel);
+
     setSubmitting(true);
     try {
       const res = await createDevice({
         deviceId: cleanId,
         name: cleanName,
         location: cleanLocation,
+        modelNumber: selectedModel,
+        modelName: modelCfg?.modelName || modelCfg?.motorType || selectedModel,
+        motorType: modelCfg?.motorType || null,
+        motorCapacity: modelCfg?.hpRating?.label || modelCfg?.hpLabel || null,
+        phase: modelCfg?.phase || null,
       });
 
       if (res.data?.success) {
-        setFormSuccess(`Device '${cleanId}' registered successfully!`);
+        setFormSuccess(`Device '${cleanId}' created successfully with Model '${selectedModel}'! Opening Dashboard...`);
+        setNewDeviceId('');
+        setNewName('');
+        setNewLocation('');
+        setIsFormOpen(false);
+        try {
+          localStorage.setItem('wt_selected_device_id', cleanId);
+        } catch {}
+        fetchDevicesList();
+        setTimeout(() => {
+          if (onNavigate) {
+            onNavigate('dashboard');
+          }
+        }, 800);
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Failed to create device';
+      setFormError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle Register by Device ID (Claim Admin-Provided Hardware ID)
+  const handleClaimDevice = async (e) => {
+    e.preventDefault();
+    setFormError('');
+    setFormSuccess('');
+
+    const cleanId = newDeviceId.trim().toUpperCase();
+    const cleanName = newName.trim();
+    const cleanLocation = newLocation.trim();
+
+    if (!cleanId) {
+      setFormError('Please enter the Device ID provided by your administrator (e.g. WT-DEV-001)');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await claimDeviceById({
+        deviceId: cleanId,
+        name: cleanName || undefined,
+        location: cleanLocation || undefined,
+      });
+
+      if (res.data?.success) {
+        setFormSuccess(
+          res.data.message ||
+          `Registration request for Device '${cleanId}' submitted! Status: Pending approval by admin. It will appear on your dashboard and history once approved by admin.`
+        );
         setNewDeviceId('');
         setNewName('');
         setNewLocation('');
         setIsFormOpen(false);
         fetchDevicesList();
-        setTimeout(() => setFormSuccess(''), 4000);
       }
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Failed to register device';
+      const msg = err.response?.data?.message || err.message || 'Failed to register device by ID';
       setFormError(msg);
     } finally {
       setSubmitting(false);
@@ -193,7 +314,7 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
 
   return (
     <div className="dashboard-wrapper">
-      <Sidebar currentPage="devices" onNavigate={onNavigate} onLogout={onLogout} />
+      <Sidebar currentPage="devices" onNavigate={onNavigate} onLogout={onLogout} currentUser={currentUser} onOpenProfile={onOpenProfile} />
 
       <main className="main-content">
         <Navbar
@@ -203,6 +324,7 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
           onOpenAuth={onOpenAuth}
           onLogout={onLogout}
           onRefresh={fetchDevicesList}
+          onOpenProfile={onOpenProfile}
         />
 
         {/* 1. Top Section: Register New Device Card with Open Form Button */}
@@ -216,93 +338,219 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                 <Cpu size={20} color="#00A896" />
               </div>
               <div>
-                <h2 className="device-register-title">Register New Device</h2>
+                <h2 className="device-register-title">
+                  {isAdmin ? 'Device Provisioning & Creation' : 'Device Registration'}
+                </h2>
                 <p className="device-register-subtitle">
-                  Configure and connect hardware telemetry nodes and pump controllers
+                  {isAdmin
+                    ? 'Provision and initialize IoT hardware controllers across 4 standardized motor models'
+                    : 'Register the unique Device ID provided by your Administrator to link hardware'}
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              className={`register-toggle-btn ${isFormOpen ? 'active' : ''}`}
-              onClick={() => {
-                setIsFormOpen(!isFormOpen);
-                setFormError('');
-              }}
-            >
-              {isFormOpen ? <X size={15} /> : <Plus size={16} />}
-              <span>{isFormOpen ? 'Close Form' : 'Register Device'}</span>
-            </button>
-          </div>
-
-          {/* Form opens when clicking "Register Device" */}
-          {isFormOpen && (
-            <form onSubmit={handleRegisterDevice} className="device-register-row-form animate-slide-down">
-              <div className="input-field-group field-device-id">
-                <label>Device ID</label>
-                <input
-                  type="text"
-                  placeholder="e.g. WT-DEV-001"
-                  value={newDeviceId}
-                  onChange={(e) => setNewDeviceId(e.target.value.toUpperCase())}
-                  disabled={submitting}
-                  className="row-form-input monospace"
-                  autoFocus
-                  required
-                />
-              </div>
-
-              <div className="input-field-group field-device-name">
-                <label>Device Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Overhead Tank Motor Pump"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  disabled={submitting}
-                  className="row-form-input"
-                  required
-                />
-              </div>
-
-              <div className="input-field-group field-location">
-                <label>Location</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Tower A - Rooftop Tank"
-                  value={newLocation}
-                  onChange={(e) => setNewLocation(e.target.value)}
-                  disabled={submitting}
-                  className="row-form-input"
-                  required
-                />
-              </div>
-
-              <div className="form-submit-group" style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="register-submit-btn"
-                >
-                  {submitting ? (
-                    <RefreshCw size={15} className="animate-spin" />
-                  ) : (
-                    <Plus size={16} />
-                  )}
-                  <span>Save Device</span>
-                </button>
-
+            <div className="device-action-buttons-group" style={{ display: 'flex', gap: '10px' }}>
+              {isAdmin ? (
                 <button
                   type="button"
-                  className="row-form-cancel-btn"
-                  onClick={() => setIsFormOpen(false)}
-                  disabled={submitting}
+                  className={`register-toggle-btn ${isFormOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsFormOpen(!isFormOpen);
+                    setFormMode('create');
+                    setFormError('');
+                  }}
                 >
-                  Cancel
+                  <Plus size={16} />
+                  <span>Create Device (4 Models)</span>
                 </button>
-              </div>
-            </form>
+              ) : (
+                <button
+                  type="button"
+                  className={`register-toggle-btn btn-claim-mode ${isFormOpen ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsFormOpen(!isFormOpen);
+                    setFormMode('claim');
+                    setFormError('');
+                  }}
+                >
+                  <Key size={16} />
+                  <span>Register by Device ID</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Form opens when clicking the action button */}
+          {isFormOpen && (
+            <div className="device-register-full-form animate-slide-down">
+              {isAdmin ? (
+                /* Mode 1: Create Device with 4 Models (Admin only) */
+                <form onSubmit={handleRegisterDevice}>
+                  <div className="register-fields-grid" style={{ marginTop: '0', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                    <div className="input-field-group">
+                      <label>Motor Model *</label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        disabled={submitting}
+                        className="row-form-input"
+                        style={{ cursor: 'pointer', fontWeight: 600, background: '#FFFFFF' }}
+                        required
+                      >
+                        {availableModels.map((m) => {
+                          const phaseTag = m.phase ? `(${m.phase})` : '';
+                          const hpTag = m.hpLabel || (m.hpRating?.label) || '';
+                          return (
+                            <option key={m.modelNumber} value={m.modelNumber}>
+                              {m.modelNumber} – {m.modelName || m.motorType} {hpTag ? `[${hpTag}]` : ''} {phaseTag}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div className="input-field-group">
+                      <label>Device ID *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. WT-DEV-001"
+                        value={newDeviceId}
+                        onChange={(e) => setNewDeviceId(e.target.value.toUpperCase())}
+                        disabled={submitting}
+                        className="row-form-input monospace"
+                        autoFocus
+                        required
+                      />
+                    </div>
+
+                    <div className="input-field-group">
+                      <label>Device Name *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Overhead Tank Motor Pump"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        disabled={submitting}
+                        className="row-form-input"
+                        required
+                      />
+                    </div>
+
+                    <div className="input-field-group">
+                      <label>Location *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Tower A - Rooftop Tank"
+                        value={newLocation}
+                        onChange={(e) => setNewLocation(e.target.value)}
+                        disabled={submitting}
+                        className="row-form-input"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-submit-row" style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+                    <button
+                      type="submit"
+                      disabled={submitting || !selectedModel}
+                      className="register-submit-btn"
+                    >
+                      {submitting ? (
+                        <RefreshCw size={15} className="animate-spin" />
+                      ) : (
+                        <Plus size={16} />
+                      )}
+                      <span>Create Device</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="row-form-cancel-btn"
+                      onClick={() => setIsFormOpen(false)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* Mode 2: Register by Device ID (Claim Admin-Provided Hardware ID) */
+                <form onSubmit={handleClaimDevice}>
+                  <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '13px', color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Key size={18} style={{ flexShrink: 0, color: '#2563EB' }} />
+                    <div>
+                      <strong>Hardware Activation:</strong> Enter the unique Device ID provided by your System Administrator to bind and activate this tank controller for your account.
+                    </div>
+                  </div>
+
+                  <div className="register-fields-grid" style={{ marginTop: '0', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                    <div className="input-field-group">
+                      <label>Device ID (Provided by Admin) *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. WT-001 or WT-DEV-102"
+                        value={newDeviceId}
+                        onChange={(e) => setNewDeviceId(e.target.value.toUpperCase())}
+                        disabled={submitting}
+                        className="row-form-input monospace"
+                        autoFocus
+                        required
+                      />
+                    </div>
+
+                    <div className="input-field-group">
+                      <label>Friendly Device Name (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. My Rooftop Water Tank"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        disabled={submitting}
+                        className="row-form-input"
+                      />
+                    </div>
+
+                    <div className="input-field-group">
+                      <label>Location (Optional)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Building A - 2nd Floor"
+                        value={newLocation}
+                        onChange={(e) => setNewLocation(e.target.value)}
+                        disabled={submitting}
+                        className="row-form-input"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-submit-row" style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+                    <button
+                      type="submit"
+                      disabled={submitting || !newDeviceId.trim()}
+                      className="register-submit-btn"
+                      style={{ background: 'linear-gradient(135deg, #0284C7 0%, #0369A1 100%)' }}
+                    >
+                      {submitting ? (
+                        <RefreshCw size={15} className="animate-spin" />
+                      ) : (
+                        <CheckCircle2 size={16} />
+                      )}
+                      <span>Register & Activate Device</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="row-form-cancel-btn"
+                      onClick={() => setIsFormOpen(false)}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           )}
 
           {/* Feedback Alerts */}
@@ -369,25 +617,27 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
             <table className="telemetry-table">
               <thead>
                 <tr>
-                  <th style={{ width: '60px' }}>#</th>
-                  <th style={{ width: '180px' }}>Device ID</th>
+                  <th style={{ width: '50px' }}>#</th>
+                  <th style={{ width: '150px' }}>Device ID</th>
                   <th>Device Name</th>
+                  <th style={{ width: '140px' }}>Model</th>
                   <th>Location</th>
-                  <th style={{ width: '180px' }}>Registered On</th>
-                  <th style={{ width: '130px', textAlign: 'right' }}>Actions</th>
+                  <th style={{ width: '120px' }}>Status</th>
+                  <th style={{ width: '150px' }}>Registered On</th>
+                  <th style={{ width: '120px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && filteredDevices.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '50px 0', color: '#64748B' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '50px 0', color: '#64748B' }}>
                       <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px', color: '#00A896' }} />
                       <div>Loading registered devices...</div>
                     </td>
                   </tr>
                 ) : filteredDevices.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '50px 0', color: '#94A3B8' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '50px 0', color: '#94A3B8' }}>
                       <AlertCircle size={28} style={{ margin: '0 auto 10px', color: '#F59E0B' }} />
                       <div style={{ fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
                         {searchTerm ? 'No matching devices found' : 'No Devices Registered Yet'}
@@ -433,6 +683,11 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                             />
                           </td>
                           <td>
+                            <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: 600 }}>
+                              {dev.modelNumber || 'Standard'}
+                            </span>
+                          </td>
+                          <td>
                             <input
                               type="text"
                               value={editLocation}
@@ -440,6 +695,9 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                               placeholder="Location"
                               className="inline-edit-input"
                             />
+                          </td>
+                          <td>
+                            <span style={{ color: '#94A3B8', fontSize: '12px' }}>-</span>
                           </td>
                           <td style={{ fontSize: '12px', color: '#94A3B8' }}>
                             <div>{formattedDate}</div>
@@ -494,10 +752,82 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                           </span>
                         </td>
                         <td>
+                          {dev.modelNumber ? (
+                            <span
+                              className="table-model-badge"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                background: '#EFF6FF',
+                                color: '#0284C7',
+                                border: '1px solid #BFDBFE',
+                              }}
+                              title={`Model: ${dev.modelNumber} (${dev.modelName || dev.motorType || ''})`}
+                            >
+                              <Layers size={11} />
+                              <span>{dev.modelNumber}</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94A3B8', fontSize: '11.5px' }}>Standard</span>
+                          )}
+                        </td>
+                        <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569', fontSize: '13px' }}>
                             <MapPin size={14} color="#00A896" />
                             <span>{dev.location}</span>
                           </div>
+                        </td>
+                        <td>
+                          {dev.approvalStatus === 'PENDING' ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                background: '#FEF3C7',
+                                color: '#B45309',
+                                border: '1px solid #FDE68A',
+                              }}
+                              title="Device registered by user. Pending approval by admin before activating."
+                            >
+                              ⏳ Pending approval by admin
+                            </span>
+                          ) : dev.approvalStatus === 'REJECTED' ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                background: '#FEE2E2',
+                                color: '#DC2626',
+                                border: '1px solid #FECACA',
+                              }}
+                              title={dev.rejectionReason || 'Registration Rejected by Administrator'}
+                            >
+                              ✕ Rejected
+                            </span>
+                          ) : dev.status === 'Fault' || dev.deviceStatus === 'Fault' ? (
+                            <span className="badge-status-fault" title={dev.faultDescription || 'Fault condition reported'}>
+                              <AlertCircle size={12} /> Fault
+                            </span>
+                          ) : (
+                            <span className="badge-status-active">
+                              <CheckCircle2 size={12} /> Active / Approved
+                            </span>
+                          )}
                         </td>
                         <td>
                           <div style={{ fontWeight: 500, color: '#1E293B', fontSize: '12px' }}>{formattedDate}</div>
@@ -505,6 +835,43 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout }) => {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                            {dev.approvalStatus === 'PENDING' ? (
+                              <span
+                                style={{
+                                  fontSize: '11.5px',
+                                  color: '#B45309',
+                                  fontWeight: 700,
+                                  padding: '4px 8px',
+                                  background: '#FEF3C7',
+                                  borderRadius: '6px',
+                                  border: '1px solid #FDE68A',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
+                                title="Device registered by you. Waiting for Administrator approval."
+                              >
+                                ⏳ Pending approval by admin
+                              </span>
+                            ) : dev.approvalStatus === 'REJECTED' ? (
+                              <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: 600, padding: '3px 6px', background: '#FEE2E2', borderRadius: '4px' }}>
+                                Rejected
+                              </span>
+                            ) : (
+                              <button
+                                className="device-action-btn view-dash"
+                                onClick={() => {
+                                  try {
+                                    localStorage.setItem('wt_selected_device_id', dev.deviceId);
+                                  } catch {}
+                                  if (onNavigate) onNavigate('dashboard');
+                                }}
+                                title="Open Device in Dashboard"
+                                style={{ background: '#F0FDFA', color: '#0D9488', border: '1px solid #CCFBF1' }}
+                              >
+                                <ExternalLink size={13} />
+                              </button>
+                            )}
                             <button
                               className="device-action-btn edit"
                               onClick={() => startEdit(dev)}

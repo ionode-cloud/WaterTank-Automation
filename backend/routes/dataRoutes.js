@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const dataController = require('../controllers/dataController');
+const { optionalProtect } = require('../middleware/auth');
 
 // Unified CRUD Endpoints for /api/data
-router.get('/', dataController.getData);
-router.get('/:id', dataController.getData);
+router.get('/', optionalProtect, dataController.getData);
+router.get('/:id', optionalProtect, dataController.getData);
 
 router.post('/', dataController.createData);
 

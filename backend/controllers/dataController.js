@@ -26,14 +26,71 @@ exports.getData = async (req, res) => {
       });
     }
 
+    // Return all distinct device IDs that exist in telemetry history or devices (for Admin dropdown)
+    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+    if (req.query.devicesOnly === 'true' || req.query.view === 'devices') {
+      const Device = require('../models/Device');
+      if (isUserAdmin) {
+        const [sensorDevs, motorDevs, regDevs] = await Promise.all([
+          SensorData.distinct('deviceId'),
+          MotorHistory.distinct('deviceId'),
+          Device.distinct('deviceId'),
+        ]);
+        const allUniqueDevs = Array.from(new Set([...sensorDevs, ...motorDevs, ...regDevs])).filter(Boolean).sort();
+        return res.status(200).json({
+          success: true,
+          data: allUniqueDevs,
+        });
+      } else {
+        const userDevices = req.user ? await Device.find({
+          assignedUserId: req.user._id,
+          $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+        }).distinct('deviceId') : [];
+        return res.status(200).json({
+          success: true,
+          data: userDevices,
+        });
+      }
+    }
+
     // List query with filters & pagination
     const limit = Math.min(500, parseInt(req.query.limit, 10) || 50);
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const skip = (page - 1) * limit;
 
     const filter = {};
-    if (req.query.deviceId) {
-      filter.deviceId = req.query.deviceId.toUpperCase();
+    const Device = require('../models/Device');
+
+    // Role-based history scoping: Regular users see only their assigned AND APPROVED device history.
+    // Administrators see ALL telemetry history across ALL devices (past, present, deleted, or unassigned).
+    if (!isUserAdmin) {
+      if (!req.user) {
+        return res.status(200).json({
+          success: true,
+          pagination: { total: 0, page, limit, totalPages: 0 },
+          data: [],
+        });
+      }
+      const userDevices = await Device.find({
+        assignedUserId: req.user._id,
+        $or: [{ approvalStatus: 'APPROVED' }, { approvalStatus: { $exists: false } }],
+      }).distinct('deviceId');
+
+      if (req.query.deviceId) {
+        const reqDevId = String(req.query.deviceId).trim().toUpperCase();
+        if (!userDevices.includes(reqDevId)) {
+          return res.status(200).json({
+            success: true,
+            pagination: { total: 0, page, limit, totalPages: 0 },
+            data: [],
+          });
+        }
+        filter.deviceId = reqDevId;
+      } else {
+        filter.deviceId = { $in: userDevices };
+      }
+    } else if (req.query.deviceId) {
+      filter.deviceId = String(req.query.deviceId).trim().toUpperCase();
     }
     if (req.query.motorStatus) {
       filter.motorStatus = req.query.motorStatus.toUpperCase();

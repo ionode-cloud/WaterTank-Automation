@@ -14,6 +14,7 @@ import {
   Layers,
   Users,
   Smartphone,
+  Menu,
 } from 'lucide-react';
 
 const Navbar = ({
@@ -133,8 +134,17 @@ const Navbar = ({
 
   return (
     <header className="top-navbar-container">
-      {/* 1. Left: Active Tab Title & Breadcrumb */}
+      {/* 1. Left: Mobile Toggle & Active Tab Title */}
       <div className="navbar-left-brand">
+        <button
+          type="button"
+          className="navbar-mobile-toggle"
+          onClick={() => document.body.classList.toggle('sidebar-mobile-open')}
+          aria-label="Toggle navigation menu"
+        >
+          <Menu size={18} />
+        </button>
+
         <div className="navbar-page-icon-badge">
           {pageInfo.icon}
         </div>

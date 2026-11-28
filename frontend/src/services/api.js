@@ -65,6 +65,8 @@ export const createDevice = (payload) => api.post('/device', payload);
 export const sendDeviceData = (payload) => api.post('/device', payload);
 export const updateDevice = (id, payload) => api.put(id ? `/device/${id}` : '/device', payload);
 export const deleteDevice = (id) => api.delete(id ? `/device/${id}` : '/device');
+export const forceDeviceOn = (id) => api.post(`/device/${id}/force-on`);
+export const forceDeviceOff = (id) => api.post(`/device/${id}/force-off`);
 
 // Telemetry history helper via /api/data
 export const getData = (params = {}) => api.get('/data', { params });

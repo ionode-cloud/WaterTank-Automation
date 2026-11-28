@@ -121,6 +121,16 @@ const sensorDataSchema = new mongoose.Schema(
       required: true,
       default: 'OFF',
     },
+    forceOn: {
+      type: Boolean,
+      default: false,
+      description: 'Force ON state at time of telemetry record',
+    },
+    forceOff: {
+      type: Boolean,
+      default: false,
+      description: 'Force OFF state at time of telemetry record',
+    },
     deviceStatus: {
       type: String,
       enum: ['Active', 'Fault', null],

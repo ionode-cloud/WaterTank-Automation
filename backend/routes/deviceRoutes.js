@@ -11,6 +11,15 @@ router.get('/user-registered-devices', protect, adminOnly, deviceController.getU
 router.put('/user-registered-devices/:id/approve', protect, adminOnly, deviceController.approveUserDevice);
 router.put('/user-registered-devices/:id/reject', protect, adminOnly, deviceController.rejectUserDevice);
 
+// Dedicated Force ON / Force OFF endpoints per device
+router.route('/:id/force-on')
+  .post(optionalProtect, deviceController.forceDeviceMotorOn)
+  .put(optionalProtect, deviceController.forceDeviceMotorOn);
+
+router.route('/:id/force-off')
+  .post(optionalProtect, deviceController.forceDeviceMotorOff)
+  .put(optionalProtect, deviceController.forceDeviceMotorOff);
+
 // All unified CRUD & Telemetry ingestion methods on /api/device
 router.route('/')
   .get(optionalProtect, deviceController.getDevices)

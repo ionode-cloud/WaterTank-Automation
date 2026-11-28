@@ -352,11 +352,27 @@ const executeMotorCommand = async (commandType, source = 'dashboard', deviceId =
 
     baseDevState.deviceId = cleanId;
     baseDevState.motorStatus = targetStatus;
+    baseDevState.forceOn = targetStatus === 'ON';
+    baseDevState.forceOff = targetStatus === 'OFF';
     baseDevState.tankCapacity = cap;
     baseDevState.waterConsumption = con;
     baseDevState.waterLevel = wl;
     baseDevState.isHardwareConnected = true;
     baseDevState.hasData = true;
+
+    // Synchronize Force ON / Force OFF states to the Device model
+    const DeviceModel = require('../models/Device');
+    await DeviceModel.updateOne(
+      { deviceId: cleanId },
+      {
+        $set: {
+          forceOn: targetStatus === 'ON',
+          forceOff: targetStatus === 'OFF',
+          motorStatus: targetStatus,
+          lastActive: acknowledgedAt,
+        },
+      }
+    ).catch(() => {});
 
     if (targetStatus === 'ON') {
       baseDevState.lastOnTime = acknowledgedAt;

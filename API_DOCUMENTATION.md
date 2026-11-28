@@ -758,6 +758,56 @@ Approves a pending registration request. The device immediately appears on the u
 
 ---
 
+### 7.9 Force Motor ON on Device
+Overrides motor status to **ON** for the specified device.
+- **Rule**: If `forceOn` is `true`, `motorStatus` is forced to `'ON'` (even if it was previously `'OFF'`), and `forceOff` is set to `false`.
+
+- **Method**: `POST` | `PUT`
+- **Endpoint**: `/api/device/:id/force-on` (supports `deviceId` or MongoDB `_id`)
+- **Access**: Authenticated
+
+#### Response (200 OK)
+```json
+{
+  "success": true,
+  "message": "Force ON successfully executed for device WT-DEV-001",
+  "data": {
+    "deviceId": "WT-DEV-001",
+    "name": "Tower A Overhead Pump",
+    "forceOn": true,
+    "forceOff": false,
+    "motorStatus": "ON"
+  }
+}
+```
+
+---
+
+### 7.10 Force Motor OFF on Device
+Overrides motor status to **OFF** for the specified device.
+- **Rule**: If `forceOff` is `true`, `motorStatus` is forced to `'OFF'` (even if it was previously `'ON'`), and `forceOn` is set to `false`.
+
+- **Method**: `POST` | `PUT`
+- **Endpoint**: `/api/device/:id/force-off` (supports `deviceId` or MongoDB `_id`)
+- **Access**: Authenticated
+
+#### Response (200 OK)
+```json
+{
+  "success": true,
+  "message": "Force OFF successfully executed for device WT-DEV-001",
+  "data": {
+    "deviceId": "WT-DEV-001",
+    "name": "Tower A Overhead Pump",
+    "forceOn": false,
+    "forceOff": true,
+    "motorStatus": "OFF"
+  }
+}
+```
+
+---
+
 ## 8. Telemetry Data & Records (`/api/data`)
 
 ### 8.1 Query Telemetry History (GET)

@@ -70,6 +70,24 @@ const deviceSchema = new mongoose.Schema(
       enum: ['AUTO', 'MANUAL'],
       default: 'MANUAL',
     },
+    // Motor operational state & Force Override Controls
+    motorStatus: {
+      type: String,
+      enum: ['ON', 'OFF'],
+      default: 'OFF',
+      index: true,
+      description: 'Current operational state of the motor: ON or OFF',
+    },
+    forceOn: {
+      type: Boolean,
+      default: false,
+      description: 'Force ON manual override flag. When true, motorStatus is forced to ON.',
+    },
+    forceOff: {
+      type: Boolean,
+      default: false,
+      description: 'Force OFF manual override flag. When true, motorStatus is forced to OFF.',
+    },
     // Multi-tenant user ownership
     assignedUserId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -165,5 +183,40 @@ const deviceSchema = new mongoose.Schema(
 
 deviceSchema.index({ createdAt: -1 });
 deviceSchema.index({ assignedUserId: 1, modelNumber: 1 });
+
+/**
+ * Enforce Force ON / Force OFF motor state transition logic:
+ * - If forceOn is true: motorStatus becomes 'ON' (if it was OFF, it also turns ON) and forceOff becomes false.
+ * - If forceOff is true: motorStatus becomes 'OFF' (if it was ON, it turns OFF, or if already OFF, stays OFF) and forceOn becomes false.
+ */
+deviceSchema.pre('save', function (next) {
+  if (this.forceOn === true || String(this.forceOn).toLowerCase() === 'true') {
+    this.forceOn = true;
+    this.forceOff = false;
+    this.motorStatus = 'ON';
+  } else if (this.forceOff === true || String(this.forceOff).toLowerCase() === 'true') {
+    this.forceOff = true;
+    this.forceOn = false;
+    this.motorStatus = 'OFF';
+  }
+  next();
+});
+
+deviceSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function (next) {
+  const update = this.getUpdate();
+  if (!update) return next();
+
+  const setObj = update.$set || update;
+  if (setObj.forceOn === true || String(setObj.forceOn).toLowerCase() === 'true') {
+    setObj.forceOn = true;
+    setObj.forceOff = false;
+    setObj.motorStatus = 'ON';
+  } else if (setObj.forceOff === true || String(setObj.forceOff).toLowerCase() === 'true') {
+    setObj.forceOff = true;
+    setObj.forceOn = false;
+    setObj.motorStatus = 'OFF';
+  }
+  next();
+});
 
 module.exports = mongoose.model('Device', deviceSchema);

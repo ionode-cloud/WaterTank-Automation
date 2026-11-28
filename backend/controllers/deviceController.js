@@ -74,6 +74,8 @@ exports.saveDeviceData = async (req, res) => {
       waterconsuption,
       waterLevel,
       motorStatus,
+      forceOn,
+      forceOff,
       energyConsumption,
       timestamp,
     } = req.body;
@@ -113,7 +115,15 @@ exports.saveDeviceData = async (req, res) => {
           : (waterLevel !== undefined ? Math.round((Number(waterLevel) / 100) * (cap || 1000)) : 0));
 
     const wl = (cap && cap > 0) ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : (waterLevel !== undefined ? Number(waterLevel) : null);
-    const ms = motorStatus ? (String(motorStatus).toUpperCase() === 'ON' ? 'ON' : 'OFF') : undefined;
+    let ms = motorStatus ? (String(motorStatus).toUpperCase() === 'ON' ? 'ON' : 'OFF') : undefined;
+    const fOn = forceOn !== undefined ? (forceOn === true || String(forceOn).toLowerCase() === 'true') : undefined;
+    const fOff = forceOff !== undefined ? (forceOff === true || String(forceOff).toLowerCase() === 'true') : undefined;
+
+    if (fOn === true) {
+      ms = 'ON';
+    } else if (fOff === true) {
+      ms = 'OFF';
+    }
 
     // Determine normalized status (Active vs Fault)
     const rawStatus = (deviceStatus || status || '').trim();
@@ -154,6 +164,15 @@ exports.saveDeviceData = async (req, res) => {
           await Device.updateOne({ _id: existingDevice._id }, { $unset: { description: 1 } });
         }
       }
+      if (fOn !== undefined) {
+        updates.forceOn = fOn;
+        if (fOn === true) updates.forceOff = false;
+      }
+      if (fOff !== undefined) {
+        updates.forceOff = fOff;
+        if (fOff === true) updates.forceOn = false;
+      }
+      if (ms !== undefined) updates.motorStatus = ms;
 
       deviceDoc = await Device.findByIdAndUpdate(existingDevice._id, { $set: updates }, { new: true });
     } else {
@@ -167,6 +186,15 @@ exports.saveDeviceData = async (req, res) => {
         lastActive: new Date(),
         lastAck: new Date(),
       };
+      if (fOn !== undefined) {
+        devPayload.forceOn = fOn;
+        if (fOn === true) devPayload.forceOff = false;
+      }
+      if (fOff !== undefined) {
+        devPayload.forceOff = fOff;
+        if (fOff === true) devPayload.forceOn = false;
+      }
+      if (ms !== undefined) devPayload.motorStatus = ms;
       if (cleanModelNumber) {
         devPayload.modelNumber = cleanModelNumber;
         devPayload.modelName = modelName || modelCfg?.modelName || cleanModelNumber;
@@ -271,7 +299,7 @@ exports.saveDeviceData = async (req, res) => {
         : (currentState.energyConsumption || 0);
 
       const recordTime = timestamp ? new Date(timestamp) : new Date();
-      const finalMotorStatus = ms || currentState.motorStatus || 'OFF';
+      const finalMotorStatus = (fOn === true ? 'ON' : (fOff === true ? 'OFF' : (ms || currentState.motorStatus || 'OFF')));
 
       // Determine water level status (Low / Medium / High)
       let resolvedWlStatus = waterLevelStatus || null;
@@ -285,6 +313,8 @@ exports.saveDeviceData = async (req, res) => {
         energyConsumption: +energy.toFixed(3),
         timestamp: recordTime,
         deviceStatus: resolvedDeviceStatus,
+        forceOn: Boolean(fOn !== undefined ? fOn : deviceDoc?.forceOn),
+        forceOff: Boolean(fOff !== undefined ? fOff : deviceDoc?.forceOff),
       };
 
       if (v !== null) sensorPayload.voltage = +v.toFixed(1);
@@ -504,6 +534,14 @@ exports.getDevices = async (req, res) => {
           delete cleanDev.description;
         }
 
+        const devForceOn = Boolean(dev.forceOn);
+        const devForceOff = Boolean(dev.forceOff);
+        const devMotorStatus = devForceOn ? 'ON' : (devForceOff ? 'OFF' : (dev.motorStatus || (latest ? latest.motorStatus : (rt?.motorStatus ?? 'OFF'))));
+
+        cleanDev.motorStatus = devMotorStatus;
+        cleanDev.forceOn = devForceOn;
+        cleanDev.forceOff = devForceOff;
+
         if (!hasTelemetry) {
           return cleanDev;
         }
@@ -537,7 +575,9 @@ exports.getDevices = async (req, res) => {
             ...(cleanDev.tankCapacity !== undefined && cleanDev.tankCapacity !== null ? { tankCapacity: cap } : {}),
             waterConsumption: con,
             waterLevel: wl,
-            motorStatus: latest ? latest.motorStatus : (rt?.motorStatus ?? 'OFF'),
+            motorStatus: devMotorStatus,
+            forceOn: devForceOn,
+            forceOff: devForceOff,
             energyConsumption: latest ? latest.energyConsumption : (rt?.energyConsumption ?? 0),
             deviceStatus: devStatus,
             timestamp: latest?.timestamp || rt?.timestamp || dev.lastActive || new Date(),
@@ -593,6 +633,14 @@ exports.getDeviceById = async (req, res) => {
       delete cleanDev.description;
     }
 
+    const devForceOn = Boolean(device.forceOn);
+    const devForceOff = Boolean(device.forceOff);
+    const devMotorStatus = devForceOn ? 'ON' : (devForceOff ? 'OFF' : (device.motorStatus || (latest ? latest.motorStatus : (rt?.motorStatus ?? 'OFF'))));
+
+    cleanDev.motorStatus = devMotorStatus;
+    cleanDev.forceOn = devForceOn;
+    cleanDev.forceOff = devForceOff;
+
     if (!hasTelemetry) {
       return res.status(200).json({
         success: true,
@@ -616,7 +664,9 @@ exports.getDeviceById = async (req, res) => {
           ...(cleanDev.tankCapacity !== undefined ? { tankCapacity: cap } : {}),
           waterConsumption: con,
           waterLevel: wl,
-          motorStatus: latest ? latest.motorStatus : (rt?.motorStatus ?? 'OFF'),
+          motorStatus: devMotorStatus,
+          forceOn: devForceOn,
+          forceOff: devForceOff,
           energyConsumption: latest ? latest.energyConsumption : (rt?.energyConsumption ?? 0),
           timestamp: latest?.timestamp || rt?.timestamp || device.lastActive || new Date(),
         },
@@ -1086,6 +1136,100 @@ exports.rejectUserDevice = async (req, res) => {
       success: false,
       message: 'Failed to reject device registration',
       error: err.message,
+    });
+  }
+};
+
+/**
+ * POST /api/device/:id/force-on
+ * Overrides motor status to ON. When forceOn is true:
+ * - forceOn is set to true
+ * - forceOff is set to false
+ * - motorStatus is set to ON
+ */
+exports.forceDeviceMotorOn = async (req, res) => {
+  try {
+    const rawId = req.params?.id || req.body?.deviceId || req.query?.deviceId;
+    if (!rawId) {
+      return res.status(400).json({ success: false, message: 'Device ID is required' });
+    }
+
+    let device = null;
+    if (String(rawId).match(/^[0-9a-fA-F]{24}$/)) {
+      device = await Device.findById(rawId);
+    }
+    if (!device) {
+      device = await Device.findOne({ deviceId: String(rawId).trim().toUpperCase() });
+    }
+    if (!device) {
+      return res.status(404).json({ success: false, message: `Device '${rawId}' not found` });
+    }
+
+    device.forceOn = true;
+    device.forceOff = false;
+    device.motorStatus = 'ON';
+    device.lastActive = new Date();
+    await device.save();
+
+    await iotService.executeMotorCommand('ON', req.body?.source || 'device_force_on', device.deviceId);
+
+    return res.status(200).json({
+      success: true,
+      message: `Force ON successfully executed for device ${device.deviceId}`,
+      data: device,
+    });
+  } catch (error) {
+    console.error('[/api/device/:id/force-on error]', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to execute Force ON for device',
+    });
+  }
+};
+
+/**
+ * POST /api/device/:id/force-off
+ * Overrides motor status to OFF. When forceOff is true:
+ * - forceOff is set to true
+ * - forceOn is set to false
+ * - motorStatus is set to OFF
+ */
+exports.forceDeviceMotorOff = async (req, res) => {
+  try {
+    const rawId = req.params?.id || req.body?.deviceId || req.query?.deviceId;
+    if (!rawId) {
+      return res.status(400).json({ success: false, message: 'Device ID is required' });
+    }
+
+    let device = null;
+    if (String(rawId).match(/^[0-9a-fA-F]{24}$/)) {
+      device = await Device.findById(rawId);
+    }
+    if (!device) {
+      device = await Device.findOne({ deviceId: String(rawId).trim().toUpperCase() });
+    }
+    if (!device) {
+      return res.status(404).json({ success: false, message: `Device '${rawId}' not found` });
+    }
+
+    device.forceOff = true;
+    device.forceOn = false;
+    device.motorStatus = 'OFF';
+    device.lastActive = new Date();
+    await device.save();
+
+    await iotService.executeMotorCommand('OFF', req.body?.source || 'device_force_off', device.deviceId);
+
+    return res.status(200).json({
+      success: true,
+      message: `Force OFF successfully executed for device ${device.deviceId}`,
+      data: device,
+    });
+  } catch (error) {
+    console.error('[/api/device/:id/force-off error]', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to execute Force OFF for device',
     });
   }
 };

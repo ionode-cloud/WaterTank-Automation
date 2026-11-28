@@ -148,6 +148,8 @@ exports.createData = async (req, res) => {
       waterConsumption,
       waterconsuption,
       motorStatus = 'OFF',
+      forceOn,
+      forceOff,
       energyConsumption,
       timestamp,
     } = req.body;
@@ -171,7 +173,15 @@ exports.createData = async (req, res) => {
 
     // Calculate waterLevel percentage dynamically
     const wl = cap > 0 ? Math.min(100, Math.max(0, Math.round((con / cap) * 100))) : 0;
-    const ms = (motorStatus || 'OFF').toUpperCase() === 'ON' ? 'ON' : 'OFF';
+    let ms = (motorStatus || 'OFF').toUpperCase() === 'ON' ? 'ON' : 'OFF';
+    const fOn = forceOn !== undefined ? (forceOn === true || String(forceOn).toLowerCase() === 'true') : undefined;
+    const fOff = forceOff !== undefined ? (forceOff === true || String(forceOff).toLowerCase() === 'true') : undefined;
+
+    if (fOn === true) {
+      ms = 'ON';
+    } else if (fOff === true) {
+      ms = 'OFF';
+    }
 
     const currentState = iotService.getRuntimeState(cleanDeviceId);
     const energy = energyConsumption !== undefined 
@@ -189,11 +199,28 @@ exports.createData = async (req, res) => {
       tankCapacity: cap,
       waterConsumption: con,
       motorStatus: ms,
+      forceOn: Boolean(fOn),
+      forceOff: Boolean(fOff),
       energyConsumption: +energy.toFixed(3),
       timestamp: recordTime,
     });
 
     const saved = await record.save();
+
+    // Persist to Device model
+    if (fOn !== undefined || fOff !== undefined || ms) {
+      const devUpdates = { motorStatus: ms, lastActive: recordTime };
+      if (fOn !== undefined) {
+        devUpdates.forceOn = fOn;
+        if (fOn === true) devUpdates.forceOff = false;
+      }
+      if (fOff !== undefined) {
+        devUpdates.forceOff = fOff;
+        if (fOff === true) devUpdates.forceOn = false;
+      }
+      const Device = require('../models/Device');
+      await Device.updateOne({ deviceId: cleanDeviceId }, { $set: devUpdates }).catch(() => {});
+    }
 
     // If motorStatus changed, track MotorHistory event
     if (currentState.motorStatus !== ms) {

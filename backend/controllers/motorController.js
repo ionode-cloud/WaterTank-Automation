@@ -183,16 +183,24 @@ exports.forceMotorOn = async (req, res) => {
     const result = await iotService.executeMotorCommand('ON', req.body.source || 'dashboard_header', devId);
     const state = iotService.getRuntimeState(devId);
     
+    const targetDev = devId || state?.deviceId || 'WT-DEV-001';
+    
     // Save record to ForceControl model
     await ForceControl.create({
-      deviceId: devId || state?.deviceId || 'WT-DEV-001',
+      deviceId: targetDev,
       action: 'FORCE_ON',
       motorStatus: 'ON',
       triggeredBy: req.body.source || 'dashboard_header',
       waterLevelAtTrigger: state?.waterLevel || 0,
-      note: req.body.note || `Force ON command executed for ${devId || 'system'}`,
+      note: req.body.note || `Force ON command executed for ${targetDev}`,
       status: 'SUCCESS',
     });
+
+    // Update Device model state: Force ON forces motorStatus to ON, forceOff to false
+    await Device.updateOne(
+      { deviceId: targetDev },
+      { $set: { forceOn: true, forceOff: false, motorStatus: 'ON' } }
+    ).catch(() => {});
 
     return res.status(200).json({
       success: true,
@@ -216,16 +224,24 @@ exports.forceMotorOff = async (req, res) => {
     const result = await iotService.executeMotorCommand('OFF', req.body.source || 'dashboard_header', devId);
     const state = iotService.getRuntimeState(devId);
 
+    const targetDev = devId || state?.deviceId || 'WT-DEV-001';
+
     // Save record to ForceControl model
     await ForceControl.create({
-      deviceId: devId || state?.deviceId || 'WT-DEV-001',
+      deviceId: targetDev,
       action: 'FORCE_OFF',
       motorStatus: 'OFF',
       triggeredBy: req.body.source || 'dashboard_header',
       waterLevelAtTrigger: state?.waterLevel || 0,
-      note: req.body.note || `Force OFF command executed for ${devId || 'system'}`,
+      note: req.body.note || `Force OFF command executed for ${targetDev}`,
       status: 'SUCCESS',
     });
+
+    // Update Device model state: Force OFF forces motorStatus to OFF, forceOn to false
+    await Device.updateOne(
+      { deviceId: targetDev },
+      { $set: { forceOff: true, forceOn: false, motorStatus: 'OFF' } }
+    ).catch(() => {});
 
     return res.status(200).json({
       success: true,

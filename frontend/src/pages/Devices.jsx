@@ -26,7 +26,7 @@ import {
   Shield,
   ExternalLink,
 } from 'lucide-react';
-import { getDevices, createDevice, updateDevice, deleteDevice, getModels, claimDeviceById, forceDeviceOn, forceDeviceOff } from '../services/api';
+import { getDevices, createDevice, updateDevice, deleteDevice, getModels, claimDeviceById } from '../services/api';
 import { socket } from '../services/socket';
 import { getAllModels, getModelConfig, MOTOR_MODELS } from '../config/motorModels';
 
@@ -69,65 +69,6 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout, onOpenProfile 
 
   // Copied chip state
   const [copiedId, setCopiedId] = useState(null);
-
-  // Force Control state
-  const [forcingId, setForcingId] = useState(null);
-
-  const handleForceOnDevice = async (deviceId) => {
-    try {
-      setForcingId(deviceId);
-      setFormError('');
-      const res = await forceDeviceOn(deviceId);
-      if (res.data?.success) {
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.deviceId === deviceId
-              ? {
-                  ...d,
-                  forceOn: true,
-                  forceOff: false,
-                  motorStatus: 'ON',
-                  data: { ...(d.data || {}), motorStatus: 'ON', forceOn: true, forceOff: false },
-                }
-              : d
-          )
-        );
-        setFormSuccess(`Force ON active for ${deviceId} — Motor status is ON.`);
-      }
-    } catch (err) {
-      setFormError(err.response?.data?.message || err.message || 'Failed to execute Force ON');
-    } finally {
-      setForcingId(null);
-    }
-  };
-
-  const handleForceOffDevice = async (deviceId) => {
-    try {
-      setForcingId(deviceId);
-      setFormError('');
-      const res = await forceDeviceOff(deviceId);
-      if (res.data?.success) {
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.deviceId === deviceId
-              ? {
-                  ...d,
-                  forceOff: true,
-                  forceOn: false,
-                  motorStatus: 'OFF',
-                  data: { ...(d.data || {}), motorStatus: 'OFF', forceOff: true, forceOn: false },
-                }
-              : d
-          )
-        );
-        setFormSuccess(`Force OFF active for ${deviceId} — Motor status is OFF.`);
-      }
-    } catch (err) {
-      setFormError(err.response?.data?.message || err.message || 'Failed to execute Force OFF');
-    } finally {
-      setForcingId(null);
-    }
-  };
 
   // Fetch Devices
   const fetchDevicesList = useCallback(async () => {
@@ -677,27 +618,26 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout, onOpenProfile 
               <thead>
                 <tr>
                   <th style={{ width: '50px' }}>#</th>
-                  <th style={{ width: '140px' }}>Device ID</th>
+                  <th style={{ width: '150px' }}>Device ID</th>
                   <th>Device Name</th>
-                  <th style={{ width: '120px' }}>Model</th>
+                  <th style={{ width: '140px' }}>Model</th>
                   <th>Location</th>
-                  <th style={{ width: '175px' }}>Motor & Override</th>
                   <th style={{ width: '130px' }}>Status</th>
-                  <th style={{ width: '130px' }}>Registered On</th>
+                  <th style={{ width: '150px' }}>Registered On</th>
                   <th style={{ width: '110px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && filteredDevices.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '50px 0', color: '#64748B' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '50px 0', color: '#64748B' }}>
                       <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px', color: '#00A896' }} />
                       <div>Loading registered devices...</div>
                     </td>
                   </tr>
                 ) : filteredDevices.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '50px 0', color: '#94A3B8' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '50px 0', color: '#94A3B8' }}>
                       <AlertCircle size={28} style={{ margin: '0 auto 10px', color: '#F59E0B' }} />
                       <div style={{ fontWeight: 700, color: '#1E293B', marginBottom: '4px' }}>
                         {searchTerm ? 'No matching devices found' : 'No Devices Registered Yet'}
@@ -755,9 +695,6 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout, onOpenProfile 
                               placeholder="Location"
                               className="inline-edit-input"
                             />
-                          </td>
-                          <td>
-                            <span style={{ color: '#94A3B8', fontSize: '12px' }}>-</span>
                           </td>
                           <td>
                             <span style={{ color: '#94A3B8', fontSize: '12px' }}>-</span>
@@ -844,90 +781,6 @@ const Devices = ({ onNavigate, currentUser, onOpenAuth, onLogout, onOpenProfile 
                             <MapPin size={14} color="#00A896" />
                             <span>{dev.location}</span>
                           </div>
-                        </td>
-                        <td>
-                          {(() => {
-                            const isPending = dev.approvalStatus === 'PENDING';
-                            const isMotorOn = dev.forceOn ? true : (dev.forceOff ? false : (dev.motorStatus === 'ON' || dev.data?.motorStatus === 'ON'));
-                            return (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                  <span
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      padding: '2px 8px',
-                                      borderRadius: '9999px',
-                                      fontSize: '11px',
-                                      fontWeight: 800,
-                                      background: isMotorOn ? '#DCFCE7' : '#F1F5F9',
-                                      color: isMotorOn ? '#16A34A' : '#64748B',
-                                      border: `1px solid ${isMotorOn ? '#86EFAC' : '#E2E8F0'}`,
-                                    }}
-                                  >
-                                    <span
-                                      style={{
-                                        width: '6px',
-                                        height: '6px',
-                                        borderRadius: '50%',
-                                        background: isMotorOn ? '#16A34A' : '#94A3B8',
-                                      }}
-                                    />
-                                    <span>Motor {isMotorOn ? 'ON' : 'OFF'}</span>
-                                  </span>
-                                  {dev.forceOn && (
-                                    <span style={{ fontSize: '10px', fontWeight: 800, color: '#059669', background: '#ECFDF5', padding: '1px 5px', borderRadius: '4px', border: '1px solid #A7F3D0' }}>
-                                      FORCE ON
-                                    </span>
-                                  )}
-                                  {dev.forceOff && (
-                                    <span style={{ fontSize: '10px', fontWeight: 800, color: '#DC2626', background: '#FEF2F2', padding: '1px 5px', borderRadius: '4px', border: '1px solid #FECACA' }}>
-                                      FORCE OFF
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  <button
-                                    type="button"
-                                    disabled={isPending || forcingId === dev.deviceId}
-                                    onClick={() => handleForceOnDevice(dev.deviceId)}
-                                    style={{
-                                      padding: '2px 7px',
-                                      fontSize: '10.5px',
-                                      fontWeight: 700,
-                                      borderRadius: '4px',
-                                      border: '1px solid #86EFAC',
-                                      background: dev.forceOn ? '#16A34A' : '#F0FDF4',
-                                      color: dev.forceOn ? '#FFFFFF' : '#15803D',
-                                      cursor: isPending ? 'not-allowed' : 'pointer',
-                                    }}
-                                    title={isPending ? 'Pending approval' : 'Force motor ON (if it was OFF, also turns ON)'}
-                                  >
-                                    Force ON
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isPending || forcingId === dev.deviceId}
-                                    onClick={() => handleForceOffDevice(dev.deviceId)}
-                                    style={{
-                                      padding: '2px 7px',
-                                      fontSize: '10.5px',
-                                      fontWeight: 700,
-                                      borderRadius: '4px',
-                                      border: '1px solid #FECACA',
-                                      background: dev.forceOff ? '#DC2626' : '#FEF2F2',
-                                      color: dev.forceOff ? '#FFFFFF' : '#B91C1C',
-                                      cursor: isPending ? 'not-allowed' : 'pointer',
-                                    }}
-                                    title={isPending ? 'Pending approval' : 'Force motor OFF (if it was ON, turns OFF)'}
-                                  >
-                                    Force OFF
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })()}
                         </td>
                         <td>
                           {dev.approvalStatus === 'PENDING' ? (

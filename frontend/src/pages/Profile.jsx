@@ -284,32 +284,32 @@ const Profile = ({
           )}
 
           {/* Quick Metrics KPI Cards */}
-          <div className="profile-kpi-grid">
-            <div className="dash-card profile-kpi-card">
-              <div className="kpi-icon-wrap purple">
+          <div className="profile-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px', width: '100%' }}>
+            <div className="dash-card profile-kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '18px 22px', background: '#FFFFFF', borderRadius: '14px', border: '1px solid #E2E8F0' }}>
+              <div className="kpi-icon-wrap purple" style={{ flexShrink: 0 }}>
                 <ShieldCheck size={22} />
               </div>
-              <div className="profile-kpi-info">
-                <span className="profile-kpi-label">Account Privilege</span>
-                <span className="profile-kpi-val">{isAdmin ? 'Administrator' : 'Standard User'}</span>
+              <div className="profile-kpi-info" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0, flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
+                <span className="profile-kpi-label" style={{ display: 'block', fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.6px', lineHeight: 1.2, margin: 0 }}>Account Privilege</span>
+                <span className="profile-kpi-val" style={{ display: 'block', fontSize: '20px', fontWeight: 800, color: '#0F172A', lineHeight: 1.2, margin: 0, marginTop: '2px' }}>{isAdmin ? 'Administrator' : 'Standard User'}</span>
               </div>
             </div>
 
-            <div className="dash-card profile-kpi-card">
-              <div className="kpi-icon-wrap cyan">
+            <div className="dash-card profile-kpi-card" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '18px 22px', background: '#FFFFFF', borderRadius: '14px', border: '1px solid #E2E8F0' }}>
+              <div className="kpi-icon-wrap cyan" style={{ flexShrink: 0 }}>
                 <Smartphone size={22} />
               </div>
-              <div className="profile-kpi-info">
-                <span className="profile-kpi-label">Assigned Devices</span>
-                <span className="profile-kpi-val">{userDevices.length}</span>
+              <div className="profile-kpi-info" style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0, flex: 1, alignItems: 'flex-start', justifyContent: 'center' }}>
+                <span className="profile-kpi-label" style={{ display: 'block', fontSize: '11.5px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.6px', lineHeight: 1.2, margin: 0 }}>Assigned Devices</span>
+                <span className="profile-kpi-val" style={{ display: 'block', fontSize: '20px', fontWeight: 800, color: '#0F172A', lineHeight: 1.2, margin: 0, marginTop: '2px' }}>{userDevices.length}</span>
               </div>
             </div>
           </div>
 
           {/* Two-Column Main Content Layout */}
-          <div className="profile-main-grid">
+          <div className="profile-main-grid" style={{ display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: '20px', alignItems: 'stretch' }}>
             {/* Left Column: Personal & Contact Details */}
-            <div className="dash-card profile-details-card">
+            <div className="dash-card profile-details-card" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', boxSizing: 'border-box' }}>
               <div className="profile-section-title">
                 <UserIcon size={18} className="text-teal" />
                 <h3>Personal & Contact Information</h3>
@@ -461,8 +461,8 @@ const Profile = ({
             </div>
 
             {/* Right Column: Linked Hardware */}
-            <div className="dash-card profile-devices-card">
-              <div className="profile-section-title between">
+            <div className="dash-card profile-devices-card" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', boxSizing: 'border-box' }}>
+              <div className="profile-section-title between" style={{ flexShrink: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Cpu size={18} className="text-teal" />
                   <h3>My Registered Devices</h3>
@@ -478,12 +478,12 @@ const Profile = ({
               </div>
 
               {loadingDevices ? (
-                <div className="devices-loading-state">
+                <div className="devices-loading-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, minHeight: '260px', padding: '36px 20px', gap: '12px', margin: 'auto 0' }}>
                   <Loader2 size={20} className="animate-spin text-teal" />
                   <span>Loading linked devices...</span>
                 </div>
               ) : userDevices.length > 0 ? (
-                <div className="profile-devices-list">
+                <div className="profile-devices-list" style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
                   {userDevices.map((dev) => {
                     const isPending = dev.approvalStatus === 'PENDING';
                     return (
@@ -529,7 +529,7 @@ const Profile = ({
                   })}
                 </div>
               ) : (
-                <div className="profile-no-devices">
+                <div className="profile-no-devices" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, minHeight: '260px', padding: '36px 20px', textAlign: 'center', gap: '14px', color: '#64748B', margin: 'auto 0' }}>
                   <Smartphone size={32} className="no-dev-icon" />
                   <p>No IoT devices registered yet.</p>
                   <button

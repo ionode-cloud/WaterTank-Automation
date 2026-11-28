@@ -26,3 +26,11 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Google API credentials & secrets
+*secret*.json*
+*secret*.json
+google secret.json.json
+google secret.json
+client_secret*.json
+*.secret.json

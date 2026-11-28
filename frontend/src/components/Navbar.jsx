@@ -282,21 +282,25 @@ const Navbar = ({
                   </>
                 )}
 
-                {/* Separate Profile */}
-                <div className="user-menu-divider"></div>
-                <div className="user-menu-section-label">ACCOUNT</div>
+                {/* Separate Profile (Standard User Only, not Admin) */}
+                {!isAdmin && (
+                  <>
+                    <div className="user-menu-divider"></div>
+                    <div className="user-menu-section-label">ACCOUNT</div>
 
-                <button
-                  type="button"
-                  className={`user-menu-item ${currentPage === 'profile' ? 'active-item' : ''}`}
-                  onClick={() => {
-                    setUserDropdownOpen(false);
-                    if (onNavigate) onNavigate('profile');
-                  }}
-                >
-                  <User size={15} />
-                  <span>My Profile</span>
-                </button>
+                    <button
+                      type="button"
+                      className={`user-menu-item ${currentPage === 'profile' ? 'active-item' : ''}`}
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        if (onNavigate) onNavigate('profile');
+                      }}
+                    >
+                      <User size={15} />
+                      <span>My Profile</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"

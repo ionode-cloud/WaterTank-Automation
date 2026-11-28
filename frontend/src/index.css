@@ -8984,21 +8984,21 @@ button {
 }
 
 .profile-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-  width: 100%;
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 20px !important;
+  width: 100% !important;
 }
 
 .profile-kpi-card {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 14px;
-  padding: 18px 22px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  border-radius: 14px !important;
+  padding: 18px 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
 }
 
 .profile-kpi-info {
@@ -9007,8 +9007,8 @@ button {
   align-items: flex-start !important;
   justify-content: center !important;
   gap: 4px !important;
-  min-width: 0;
-  flex: 1;
+  min-width: 0 !important;
+  flex: 1 !important;
 }
 
 .profile-kpi-label {
@@ -9020,7 +9020,7 @@ button {
   letter-spacing: 0.6px !important;
   line-height: 1.2 !important;
   margin: 0 !important;
-  white-space: nowrap;
+  white-space: nowrap !important;
 }
 
 .profile-kpi-val {
@@ -9030,13 +9030,14 @@ button {
   color: #0F172A !important;
   line-height: 1.2 !important;
   margin: 0 !important;
+  margin-top: 2px !important;
 }
 
 .profile-main-grid {
-  display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  gap: 20px;
-  align-items: stretch;
+  display: grid !important;
+  grid-template-columns: 1.15fr 0.85fr !important;
+  gap: 20px !important;
+  align-items: stretch !important;
 }
 
 .profile-details-card {
@@ -9044,11 +9045,11 @@ button {
   border-radius: 16px;
   border: 1px solid #E2E8F0;
   background: #FFFFFF;
-  height: 100%;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  height: 100% !important;
+  min-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
 }
 
 .profile-right-column {
@@ -9065,12 +9066,12 @@ button {
   border-radius: 16px;
   border: 1px solid #E2E8F0;
   background: #FFFFFF;
-  height: 100%;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  box-sizing: border-box;
+  height: 100% !important;
+  min-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  box-sizing: border-box !important;
 }
 
 .profile-security-card {
@@ -9259,37 +9260,39 @@ button {
 }
 
 .profile-no-devices {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 36px 20px;
-  text-align: center;
-  gap: 14px;
-  color: #64748B;
-  flex: 1;
-  margin: auto 0;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 36px 20px !important;
+  text-align: center !important;
+  gap: 14px !important;
+  color: #64748B !important;
+  flex: 1 !important;
+  min-height: 260px !important;
+  margin: auto 0 !important;
 }
 
 .profile-no-devices p {
-  font-size: 14px;
-  font-weight: 600;
-  color: #64748B;
-  margin: 0;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #64748B !important;
+  margin: 0 !important;
 }
 
 .devices-loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 36px 20px;
-  color: #64748B;
-  font-size: 13.5px;
-  font-weight: 600;
-  flex: 1;
-  margin: auto 0;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  padding: 36px 20px !important;
+  color: #64748B !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  flex: 1 !important;
+  min-height: 260px !important;
+  margin: auto 0 !important;
 }
 
 .btn-register-device-link {

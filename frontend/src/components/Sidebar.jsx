@@ -38,15 +38,17 @@ const Sidebar = ({
 
       {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {/* 1. Profile (Normal tab at top of Sidebar, then Dashboard) */}
-        <div
-          className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`}
-          onClick={() => onNavigate && onNavigate('profile')}
-          title="My Profile & Account Details"
-        >
-          <User size={18} />
-          <span>Profile</span>
-        </div>
+        {/* 1. Profile (Normal tab at top of Sidebar, only for Standard User, not Admin) */}
+        {!isAdmin && (
+          <div
+            className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('profile')}
+            title="My Profile & Account Details"
+          >
+            <User size={18} />
+            <span>Profile</span>
+          </div>
+        )}
 
         {/* 2. Dashboard (Standard & Admin) */}
         <div

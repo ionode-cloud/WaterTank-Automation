@@ -42,7 +42,22 @@ const Navbar = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const isAdmin = currentUser && String(currentUser.role).toUpperCase() === 'ADMIN';
+  const role = String(currentUser?.role || '').toLowerCase();
+  const isAdmin = role === 'admin';
+  const isOperator = role === 'operator';
+
+  const canShowTab = (tabId) => {
+    if (isAdmin) {
+      return tabId !== 'profile';
+    }
+    if (isOperator) {
+      const allowed = Array.isArray(currentUser?.allowedTabs)
+        ? currentUser.allowedTabs
+        : ['dashboard', 'devices', 'history'];
+      return allowed.includes(tabId);
+    }
+    return tabId === 'profile' || tabId === 'dashboard' || tabId === 'devices' || tabId === 'history';
+  };
 
   // Live real-time clock
   useEffect(() => {
@@ -171,7 +186,13 @@ const Navbar = ({
               </div>
               <div className="user-info-text">
                 <span className="user-name">{currentUser.name || 'User'}</span>
-                {isAdmin && <span className="user-role-badge">Admin</span>}
+                {isAdmin ? (
+                  <span className="user-role-badge">Admin</span>
+                ) : isOperator ? (
+                  <span className="user-role-badge" style={{ background: '#F0FDFA', color: '#0D9488', border: '1px solid #5EEAD4' }}>
+                    Operator
+                  </span>
+                ) : null}
               </div>
               <ChevronDown size={14} className="dropdown-caret" />
             </button>
@@ -181,125 +202,124 @@ const Navbar = ({
                 <div className="user-menu-header">
                   <strong>{currentUser.name}</strong>
                   <span className="user-menu-email">{currentUser.email}</span>
-                  <span className={`user-menu-role-tag ${isAdmin ? 'admin-tag' : 'user-tag'}`}>
-                    {isAdmin ? 'Administrator' : 'Standard User'}
+                  <span className={`user-menu-role-tag ${isAdmin ? 'admin-tag' : isOperator ? 'operator-tag' : 'user-tag'}`}>
+                    {isAdmin ? 'Administrator' : isOperator ? 'Operator' : 'Standard User'}
                   </span>
                 </div>
 
                 <div className="user-menu-divider"></div>
                 <div className="user-menu-section-label">NAVIGATION</div>
 
-                {/* All Tabs Navigation (User & Admin) */}
-                <button
-                  type="button"
-                  className={`user-menu-item ${currentPage === 'dashboard' ? 'active-item' : ''}`}
-                  onClick={() => {
-                    setUserDropdownOpen(false);
-                    if (onNavigate) onNavigate('dashboard');
-                  }}
-                >
-                  <LayoutDashboard size={15} />
-                  <span>Dashboard</span>
-                </button>
-
-                <button
-                  type="button"
-                  className={`user-menu-item ${currentPage === 'devices' ? 'active-item' : ''}`}
-                  onClick={() => {
-                    setUserDropdownOpen(false);
-                    if (onNavigate) onNavigate('devices');
-                  }}
-                >
-                  <Cpu size={15} />
-                  <span>Devices</span>
-                </button>
-
-                <button
-                  type="button"
-                  className={`user-menu-item ${currentPage === 'history' ? 'active-item' : ''}`}
-                  onClick={() => {
-                    setUserDropdownOpen(false);
-                    if (onNavigate) onNavigate('history');
-                  }}
-                >
-                  <History size={15} />
-                  <span>History</span>
-                </button>
-
-                {/* Admin Only: Dashboard Console & Management */}
-                {isAdmin && (
-                  <>
-                    <div className="user-menu-divider"></div>
-                    <div className="user-menu-section-label">ADMIN CONSOLE</div>
-
-                    <button
-                      type="button"
-                      className={`user-menu-item admin-menu-item ${currentPage === 'admin' ? 'active-item' : ''}`}
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        if (onNavigate) onNavigate('admin');
-                      }}
-                    >
-                      <ShieldCheck size={15} />
-                      <span>Dashboard Console</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`user-menu-item ${currentPage === 'models' ? 'active-item' : ''}`}
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        if (onNavigate) onNavigate('models');
-                      }}
-                    >
-                      <Layers size={15} />
-                      <span>Models</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`user-menu-item ${currentPage === 'registered-users' ? 'active-item' : ''}`}
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        if (onNavigate) onNavigate('registered-users');
-                      }}
-                    >
-                      <Users size={15} />
-                      <span>Registered Users</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`user-menu-item ${currentPage === 'user-devices' ? 'active-item' : ''}`}
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        if (onNavigate) onNavigate('user-devices');
-                      }}
-                    >
-                      <Smartphone size={15} />
-                      <span>User Registered Devices</span>
-                    </button>
-                  </>
+                {canShowTab('dashboard') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'dashboard' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('dashboard');
+                    }}
+                  >
+                    <LayoutDashboard size={15} />
+                    <span>Dashboard</span>
+                  </button>
                 )}
 
-                {/* Separate Profile (Standard User Only, not Admin) */}
-                {!isAdmin && (
-                  <>
-                    <div className="user-menu-divider"></div>
-                    <div className="user-menu-section-label">ACCOUNT</div>
+                {canShowTab('devices') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'devices' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('devices');
+                    }}
+                  >
+                    <Cpu size={15} />
+                    <span>Devices</span>
+                  </button>
+                )}
 
-                    <button
-                      type="button"
-                      className={`user-menu-item ${currentPage === 'profile' ? 'active-item' : ''}`}
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        if (onNavigate) onNavigate('profile');
-                      }}
-                    >
-                      <User size={15} />
-                      <span>My Profile</span>
-                    </button>
-                  </>
+                {canShowTab('user-devices') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'user-devices' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('user-devices');
+                    }}
+                  >
+                    <Smartphone size={15} />
+                    <span>User Registered Devices</span>
+                  </button>
+                )}
+
+                {canShowTab('history') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'history' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('history');
+                    }}
+                  >
+                    <History size={15} />
+                    <span>History</span>
+                  </button>
+                )}
+
+                {canShowTab('models') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'models' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('models');
+                    }}
+                  >
+                    <Layers size={15} />
+                    <span>Models</span>
+                  </button>
+                )}
+
+                {canShowTab('registered-users') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'registered-users' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('registered-users');
+                    }}
+                  >
+                    <Users size={15} />
+                    <span>Registered Users</span>
+                  </button>
+                )}
+
+                {canShowTab('admin') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item admin-menu-item ${currentPage === 'admin' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('admin');
+                    }}
+                  >
+                    <ShieldCheck size={15} />
+                    <span>Admin Console</span>
+                  </button>
+                )}
+
+                {canShowTab('profile') && (
+                  <button
+                    type="button"
+                    className={`user-menu-item ${currentPage === 'profile' ? 'active-item' : ''}`}
+                    onClick={() => {
+                      setUserDropdownOpen(false);
+                      if (onNavigate) onNavigate('profile');
+                    }}
+                  >
+                    <User size={15} />
+                    <span>My Profile</span>
+                  </button>
                 )}
 
                 <button

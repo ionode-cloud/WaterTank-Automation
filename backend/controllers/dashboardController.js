@@ -5,7 +5,7 @@ const iotService = require('../services/iotService');
 exports.getDashboardOverview = async (req, res) => {
   try {
     const requestedDeviceId = req.query.deviceId ? String(req.query.deviceId).trim().toUpperCase() : null;
-    const isUserRegular = req.user && String(req.user.role).toUpperCase() !== 'ADMIN';
+    const isUserRegular = req.user && !['ADMIN', 'OPERATOR'].includes(String(req.user.role).toUpperCase());
 
     // Find device info if requested, scoped to user if regular user
     let deviceDoc = null;

@@ -10499,6 +10499,170 @@ button {
   box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.2), 0 8px 24px rgba(2, 132, 199, 0.12) !important;
 }
 
+/* ==========================================================================
+   OPERATOR TABS SELECTION STYLES (ADMIN CONSOLE)
+   ========================================================================== */
+.operator-tabs-container {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.operator-tabs-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.operator-tabs-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.operator-tabs-subtext {
+  font-size: 11.5px;
+  color: #64748B;
+  display: block;
+  margin-top: 2px;
+}
+
+.operator-tabs-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-tab-toggle {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-tab-toggle:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+  border-color: #94A3B8;
+}
+
+.operator-tabs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.operator-tab-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  background: #FFFFFF;
+  border: 1.5px solid #E2E8F0;
+  border-radius: 9px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.operator-tab-card:hover {
+  border-color: #94A3B8;
+  background: #F8FAFC;
+}
+
+.operator-tab-card.active {
+  border-color: #0D9488;
+  background: #F0FDFA;
+}
+
+.tab-checkbox-box {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  border: 1.5px solid #CBD5E1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFFFF;
+  color: #FFFFFF;
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: all 0.15s ease;
+}
+
+.tab-checkbox-box.checked {
+  background: #0D9488;
+  border-color: #0D9488;
+}
+
+.operator-tab-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.operator-tab-text .tab-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1.2;
+}
+
+.operator-tab-card.active .tab-name {
+  color: #0F766E;
+}
+
+.operator-tab-text .tab-desc {
+  font-size: 10.5px;
+  color: #64748B;
+  margin-top: 2px;
+  line-height: 1.25;
+}
+
+.operator-tabs-assigned-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 250px;
+}
+
+.operator-tab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #F0FDFA;
+  color: #0D9488;
+  border: 1px solid #99F6E4;
+  white-space: nowrap;
+}
+
+.user-menu-role-tag.operator-tag {
+  background: #F0FDFA;
+  color: #0D9488;
+  border: 1px solid #5EEAD4;
+}
+
+
 
 
 

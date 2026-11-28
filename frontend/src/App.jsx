@@ -9,6 +9,7 @@ import AdminConsole from './pages/AdminConsole';
 import RegisteredUsers from './pages/RegisteredUsers';
 import UserRegisteredDevices from './pages/UserRegisteredDevices';
 import AuthModal from './components/AuthModal';
+import { getCurrentUser } from './services/api';
 
 const VALID_PAGES = ['landing', 'profile', 'dashboard', 'models', 'history', 'devices', 'admin', 'registered-users', 'user-devices'];
 const PROTECTED_PAGES = ['profile', 'dashboard', 'models', 'history', 'devices', 'admin', 'registered-users', 'user-devices'];
@@ -63,29 +64,58 @@ function App() {
     // If user is authenticated, check clean URL pathname
     const pageFromUrl = getPageFromUrl();
     let userRole = 'USER';
+    let userAllowedTabs = [];
     try {
       if (stored) {
         const parsed = JSON.parse(stored);
-        userRole = String(parsed.role || 'USER').toUpperCase();
+        userRole = String(parsed.role || 'USER').toLowerCase();
+        userAllowedTabs = Array.isArray(parsed.allowedTabs) ? parsed.allowedTabs : [];
       }
     } catch {}
 
     const ADMIN_PAGES = ['admin', 'registered-users', 'user-devices', 'models'];
-    if (pageFromUrl && VALID_PAGES.includes(pageFromUrl)) {
-      if (ADMIN_PAGES.includes(pageFromUrl) && userRole !== 'ADMIN') {
+
+    const resolvePage = (candidate) => {
+      if (!candidate || !VALID_PAGES.includes(candidate) || candidate === 'landing') {
+        candidate = 'dashboard';
+      }
+      if (userRole === 'admin') {
+        if (candidate === 'profile') return 'dashboard';
+        return candidate;
+      }
+      if (userRole === 'operator') {
+        const allowed = userAllowedTabs.length > 0 ? userAllowedTabs : ['dashboard', 'devices', 'history'];
+        if (allowed.includes(candidate)) return candidate;
+        return allowed[0] || 'dashboard';
+      }
+      // Standard user
+      if (ADMIN_PAGES.includes(candidate)) {
         return 'dashboard';
       }
-      return pageFromUrl;
+      return candidate;
+    };
+
+    if (pageFromUrl && VALID_PAGES.includes(pageFromUrl)) {
+      return resolvePage(pageFromUrl);
     }
     const saved = localStorage.getItem('wt_current_page');
-    if (VALID_PAGES.includes(saved) && saved !== 'landing') {
-      if (ADMIN_PAGES.includes(saved) && userRole !== 'ADMIN') {
-        return 'dashboard';
-      }
-      return saved;
-    }
-    return 'dashboard';
+    return resolvePage(saved);
   });
+
+  // Sync latest user details including allowedTabs from server on mount
+  useEffect(() => {
+    const token = localStorage.getItem('wt_token');
+    if (token) {
+      getCurrentUser()
+        .then((res) => {
+          if (res.data?.success && res.data.user) {
+            setCurrentUser(res.data.user);
+            localStorage.setItem('wt_user', JSON.stringify(res.data.user));
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   // 3. Popup Auth Modal State
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -112,20 +142,29 @@ function App() {
       return;
     }
 
-    // Role-based route guard: Non-admins cannot access admin views (including Models)
+    // Role-based route guard
+    const userRole = String(currentUser?.role || '').toLowerCase();
     const ADMIN_PAGES = ['admin', 'registered-users', 'user-devices', 'models'];
-    if (ADMIN_PAGES.includes(page)) {
-      let isUserAdmin = false;
-      try {
-        if (currentUser) {
-          isUserAdmin = String(currentUser.role).toUpperCase() === 'ADMIN';
-        } else if (stored) {
-          const parsed = JSON.parse(stored);
-          isUserAdmin = String(parsed.role || '').toUpperCase() === 'ADMIN';
-        }
-      } catch {}
 
-      if (!isUserAdmin) {
+    if (userRole === 'admin') {
+      if (page === 'profile') {
+        setCurrentPage('dashboard');
+        return;
+      }
+    } else if (userRole === 'operator') {
+      const allowed = Array.isArray(currentUser?.allowedTabs) && currentUser.allowedTabs.length > 0
+        ? currentUser.allowedTabs
+        : ['dashboard', 'devices', 'history'];
+      if (!allowed.includes(page) && page !== 'landing') {
+        const fallback = allowed[0] || 'dashboard';
+        setCurrentPage(fallback);
+        localStorage.setItem('wt_current_page', fallback);
+        window.history.replaceState({ page: fallback }, '', getUrlForPage(fallback));
+        return;
+      }
+    } else {
+      // Regular user cannot access admin pages
+      if (ADMIN_PAGES.includes(page)) {
         setCurrentPage('dashboard');
         localStorage.setItem('wt_current_page', 'dashboard');
         window.history.replaceState({ page: 'dashboard' }, '', '/dashboard');

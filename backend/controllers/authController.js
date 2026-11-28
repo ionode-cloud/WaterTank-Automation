@@ -83,6 +83,7 @@ exports.register = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
+        allowedTabs: user.allowedTabs || [],
         phone: user.phone,
         location: user.location,
         createdAt: user.createdAt,
@@ -177,6 +178,7 @@ exports.googleLogin = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
+        allowedTabs: user.allowedTabs || [],
         picture: user.picture || picture || '',
         phone: user.phone || user.mobileNumber || '',
         location: user.location || '',
@@ -248,6 +250,7 @@ exports.login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        allowedTabs: user.allowedTabs || [],
         phone: user.phone,
         lastLogin: user.lastLogin,
       },
@@ -273,7 +276,8 @@ exports.getMe = async (req, res) => {
     return res.status(200).json({
       success: true,
       user: {
-        ...req.user.toObject ? req.user.toObject() : req.user,
+        ...(req.user.toObject ? req.user.toObject() : req.user),
+        allowedTabs: req.user.allowedTabs || [],
         assignedDevices: assignedDevices || [],
         assignedDeviceCount: (assignedDevices || []).length,
       },
@@ -403,7 +407,7 @@ exports.getAllUsers = async (req, res) => {
  */
 exports.createUser = async (req, res) => {
   try {
-    const { name, email, password, role = 'admin', phone, isActive = true } = req.body;
+    const { name, email, password, role = 'admin', phone, isActive = true, allowedTabs = [] } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -437,6 +441,7 @@ exports.createUser = async (req, res) => {
       role: ['admin', 'operator', 'viewer'].includes(role) ? role : 'admin',
       phone: phone ? String(phone).trim() : '',
       isActive: Boolean(isActive),
+      allowedTabs: Array.isArray(allowedTabs) ? allowedTabs : [],
     });
 
     await user.save();
@@ -464,7 +469,7 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, password, role, phone, isActive } = req.body;
+    const { name, email, password, role, phone, isActive, allowedTabs } = req.body;
 
     const user = await User.findById(id);
     if (!user) {
@@ -480,6 +485,9 @@ exports.updateUser = async (req, res) => {
     }
     if (phone !== undefined) user.phone = String(phone).trim();
     if (isActive !== undefined) user.isActive = Boolean(isActive);
+    if (allowedTabs !== undefined && Array.isArray(allowedTabs)) {
+      user.allowedTabs = allowedTabs;
+    }
 
     if (email !== undefined) {
       const cleanEmail = String(email).trim().toLowerCase();

@@ -90,7 +90,7 @@ exports.optionalProtect = async (req, res, next) => {
  */
 exports.adminOnly = (req, res, next) => {
   const role = String(req.user?.role || '').toUpperCase();
-  if (role === 'ADMIN') {
+  if (role === 'ADMIN' || role === 'OPERATOR') {
     return next();
   }
   return res.status(403).json({
@@ -124,8 +124,8 @@ exports.requireRole = (...roles) => {
 exports.verifyDeviceOwnership = async (req, res, next) => {
   try {
     const role = String(req.user?.role || '').toUpperCase();
-    if (role === 'ADMIN') {
-      return next(); // Admins have full access
+    if (role === 'ADMIN' || role === 'OPERATOR') {
+      return next(); // Admins and Operators have full access
     }
 
     const deviceId = req.params.deviceId || req.body.deviceId || req.query.deviceId;

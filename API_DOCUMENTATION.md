@@ -384,6 +384,57 @@ Transfers hardware device ownership from one user to another.
 
 ---
 
+### 4.7 Administrator & Operator Credentials (`/api/admin/users`)
+
+Manage system administrator and operator staff accounts, role authorization, and per-account tab access permissions (`allowedTabs`).
+
+#### 4.7.1 List Administrator & Operator Accounts
+- **Method**: `GET`
+- **Endpoint**: `/api/admin/users`
+- **Access**: Admin only
+- **Query Parameters**:
+  - `search` *(optional)*: Filter by name, email, or phone.
+  - `role` *(optional)*: `'all'`, `'admin'`, or `'operator'`.
+
+#### 4.7.2 Create Administrator / Operator Credential
+- **Method**: `POST`
+- **Endpoint**: `/api/admin/users`
+- **Access**: Admin only
+
+##### Request Body
+```json
+{
+  "name": "Plant Operator",
+  "email": "operator@watertank.com",
+  "password": "SecurePassword123",
+  "role": "operator",
+  "phone": "+91 98765 43210",
+  "allowedTabs": ["dashboard", "devices", "history"]
+}
+```
+*Note: For `role: "operator"`, `allowedTabs` defines the exact tabs shown in the Sidebar & Navbar for that operator's registered ID upon login (`dashboard`, `devices`, `user-devices`, `history`, `models`, `registered-users`, `admin`, `profile`).*
+
+#### 4.7.3 Update Credential & Allowed Tabs
+- **Method**: `PUT`
+- **Endpoint**: `/api/admin/users/:id`
+- **Access**: Admin only
+
+##### Request Body
+```json
+{
+  "name": "Senior Plant Operator",
+  "role": "operator",
+  "allowedTabs": ["dashboard", "devices", "user-devices", "history"]
+}
+```
+
+#### 4.7.4 Delete Credential
+- **Method**: `DELETE`
+- **Endpoint**: `/api/admin/users/:id`
+- **Access**: Admin only
+
+---
+
 ## 5. Hardware Inventory & Verification (`/api/inventory`)
 
 ### 5.1 Verify Device ID for Registration (Public)

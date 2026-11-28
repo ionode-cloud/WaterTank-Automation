@@ -19,7 +19,26 @@ const Sidebar = ({
   onLogout,
   currentUser = null,
 }) => {
-  const isAdmin = currentUser && String(currentUser.role).toUpperCase() === 'ADMIN';
+  const role = String(currentUser?.role || '').toLowerCase();
+  const isAdmin = role === 'admin';
+  const isOperator = role === 'operator';
+
+  // Role-based Tab Visibility Helper
+  const canShowTab = (tabId) => {
+    if (isAdmin) {
+      // Admins see all tabs except Profile
+      return tabId !== 'profile';
+    }
+    if (isOperator) {
+      // Operators see strictly the tabs checked by the Administrator for their registered ID/account
+      const allowed = Array.isArray(currentUser?.allowedTabs)
+        ? currentUser.allowedTabs
+        : ['dashboard', 'devices', 'history'];
+      return allowed.includes(tabId);
+    }
+    // Standard User: Profile, Dashboard, Devices, History
+    return tabId === 'profile' || tabId === 'dashboard' || tabId === 'devices' || tabId === 'history';
+  };
 
   return (
     <aside className="sidebar">
@@ -38,8 +57,8 @@ const Sidebar = ({
 
       {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {/* 1. Profile (Normal tab at top of Sidebar, only for Standard User, not Admin) */}
-        {!isAdmin && (
+        {/* 1. Profile (Normal tab at top of Sidebar, only for Standard User or Operator granted profile) */}
+        {canShowTab('profile') && (
           <div
             className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`}
             onClick={() => onNavigate && onNavigate('profile')}
@@ -50,28 +69,32 @@ const Sidebar = ({
           </div>
         )}
 
-        {/* 2. Dashboard (Standard & Admin) */}
-        <div
-          className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
-          onClick={() => onNavigate && onNavigate('dashboard')}
-          title="Overview & Live Controls"
-        >
-          <LayoutDashboard size={18} />
-          <span>Dashboard</span>
-        </div>
+        {/* 2. Dashboard */}
+        {canShowTab('dashboard') && (
+          <div
+            className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('dashboard')}
+            title="Overview & Live Controls"
+          >
+            <LayoutDashboard size={18} />
+            <span>Dashboard</span>
+          </div>
+        )}
 
-        {/* 3. Devices (Standard & Admin) */}
-        <div
-          className={`nav-item ${currentPage === 'devices' ? 'active' : ''}`}
-          onClick={() => onNavigate && onNavigate('devices')}
-          title="Manage Hardware Devices"
-        >
-          <Cpu size={18} />
-          <span>Devices</span>
-        </div>
+        {/* 3. Devices */}
+        {canShowTab('devices') && (
+          <div
+            className={`nav-item ${currentPage === 'devices' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('devices')}
+            title="Manage Hardware Devices"
+          >
+            <Cpu size={18} />
+            <span>Devices</span>
+          </div>
+        )}
 
-        {/* 4. User Registered Devices (Admin Only - Show right after Devices tab) */}
-        {isAdmin && (
+        {/* 4. User Registered Devices */}
+        {canShowTab('user-devices') && (
           <div
             className={`nav-item ${currentPage === 'user-devices' ? 'active' : ''}`}
             onClick={() => onNavigate && onNavigate('user-devices')}
@@ -82,49 +105,52 @@ const Sidebar = ({
           </div>
         )}
 
-        {/* 5. History (Standard & Admin) */}
-        <div
-          className={`nav-item ${currentPage === 'history' ? 'active' : ''}`}
-          onClick={() => onNavigate && onNavigate('history')}
-          title="Telemetry Data & Historical Records"
-        >
-          <History size={18} />
-          <span>History</span>
-        </div>
+        {/* 5. History */}
+        {canShowTab('history') && (
+          <div
+            className={`nav-item ${currentPage === 'history' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('history')}
+            title="Telemetry Data & Historical Records"
+          >
+            <History size={18} />
+            <span>History</span>
+          </div>
+        )}
 
-        {/* 6, 7, 8: OTHER ADMIN ONLY NAVIGATION ITEMS */}
-        {isAdmin && (
-          <>
-            {/* Motor Models (Admin Only) */}
-            <div
-              className={`nav-item ${currentPage === 'models' ? 'active' : ''}`}
-              onClick={() => onNavigate && onNavigate('models')}
-              title="Motor Models & Category Specifications (Admin Only)"
-            >
-              <Layers size={18} />
-              <span>Models</span>
-            </div>
+        {/* 6. Motor Models */}
+        {canShowTab('models') && (
+          <div
+            className={`nav-item ${currentPage === 'models' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('models')}
+            title="Motor Models & Category Specifications"
+          >
+            <Layers size={18} />
+            <span>Models</span>
+          </div>
+        )}
 
-            {/* Registered Users */}
-            <div
-              className={`nav-item ${currentPage === 'registered-users' ? 'active' : ''}`}
-              onClick={() => onNavigate && onNavigate('registered-users')}
-              title="View & Manage Registered Users"
-            >
-              <Users size={18} />
-              <span>Registered Users</span>
-            </div>
+        {/* 7. Registered Users */}
+        {canShowTab('registered-users') && (
+          <div
+            className={`nav-item ${currentPage === 'registered-users' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('registered-users')}
+            title="View & Manage Registered Users"
+          >
+            <Users size={18} />
+            <span>Registered Users</span>
+          </div>
+        )}
 
-            {/* Admin Console (JWT Credentials Management) */}
-            <div
-              className={`nav-item ${currentPage === 'admin' ? 'active' : ''}`}
-              onClick={() => onNavigate && onNavigate('admin')}
-              title="Admin Security & JWT Credentials"
-            >
-              <ShieldCheck size={18} />
-              <span>Admin Console</span>
-            </div>
-          </>
+        {/* 8. Admin Console (JWT Credentials Management) */}
+        {canShowTab('admin') && (
+          <div
+            className={`nav-item ${currentPage === 'admin' ? 'active' : ''}`}
+            onClick={() => onNavigate && onNavigate('admin')}
+            title="Admin Security & JWT Credentials"
+          >
+            <ShieldCheck size={18} />
+            <span>Admin Console</span>
+          </div>
         )}
       </nav>
 

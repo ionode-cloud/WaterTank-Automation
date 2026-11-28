@@ -27,7 +27,7 @@ exports.getData = async (req, res) => {
     }
 
     // Return all distinct device IDs that exist in telemetry history or devices (for Admin dropdown)
-    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+    const isUserAdmin = req.user && ['ADMIN', 'OPERATOR'].includes(String(req.user.role || '').toUpperCase());
     if (req.query.devicesOnly === 'true' || req.query.view === 'devices') {
       const Device = require('../models/Device');
       if (isUserAdmin) {

@@ -430,7 +430,7 @@ exports.getDevices = async (req, res) => {
       const skip = (page - 1) * limit;
 
       const filter = {};
-      const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+      const isUserAdmin = req.user && ['ADMIN', 'OPERATOR'].includes(String(req.user.role || '').toUpperCase());
 
       // Role-based history scoping: Regular users see ONLY their assigned AND APPROVED device history
       if (!isUserAdmin) {
@@ -501,7 +501,7 @@ exports.getDevices = async (req, res) => {
     }
 
     // Role-based device visibility: Regular users see only their assigned AND APPROVED devices!
-    if (req.user && String(req.user.role || '').toUpperCase() !== 'ADMIN') {
+    if (req.user && !['ADMIN', 'OPERATOR'].includes(String(req.user.role || '').toUpperCase())) {
       filter.assignedUserId = req.user._id;
       // If includePending query param is not explicitly set, ONLY return approved devices!
       if (!req.query.includePending) {

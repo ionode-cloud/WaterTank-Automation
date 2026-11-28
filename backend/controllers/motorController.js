@@ -36,7 +36,7 @@ exports.getMotorHistory = async (req, res) => {
     }
 
     // Role-based Multi-User Scoping: regular users only see their own assigned AND APPROVED devices' history
-    const isUserAdmin = req.user && String(req.user.role || '').toUpperCase() === 'ADMIN';
+    const isUserAdmin = req.user && ['ADMIN', 'OPERATOR'].includes(String(req.user.role || '').toUpperCase());
     if (!isUserAdmin) {
       if (!req.user) {
         return res.status(200).json({ success: true, count: 0, data: [] });

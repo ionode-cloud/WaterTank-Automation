@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Copy,
   Check,
+  Layers,
 } from 'lucide-react';
 
 import Sidebar from '../components/Sidebar';
@@ -35,6 +36,17 @@ import {
   updateAdminUser,
   deleteAdminUser,
 } from '../services/api';
+
+export const AVAILABLE_TABS = [
+  { id: 'dashboard', label: 'Dashboard', desc: 'Live telemetry & overview' },
+  { id: 'devices', label: 'Devices', desc: 'Manage hardware & nodes' },
+  { id: 'user-devices', label: 'User Registered Devices', desc: 'View & approve user devices' },
+  { id: 'history', label: 'History', desc: 'Sensor logs & records' },
+  { id: 'models', label: 'Models', desc: 'Motor model specifications' },
+  { id: 'registered-users', label: 'Registered Users', desc: 'User management & credentials' },
+  { id: 'admin', label: 'Admin Console', desc: 'System security & admin keys' },
+  { id: 'profile', label: 'Profile', desc: 'User profile & account details' },
+];
 
 const AdminConsole = ({
   onNavigate,
@@ -71,6 +83,7 @@ const AdminConsole = ({
     password: '',
     role: 'admin',
     phone: '',
+    allowedTabs: ['dashboard', 'devices', 'history'],
   });
 
   // JWT Secret Display State
@@ -121,6 +134,7 @@ const AdminConsole = ({
       password: '',
       role: 'admin',
       phone: '',
+      allowedTabs: ['dashboard', 'devices', 'history'],
     });
     setShowAdminPassword(false);
     setShowAddAdminModal(true);
@@ -157,6 +171,7 @@ const AdminConsole = ({
       password: '',
       role: admin.role || 'admin',
       phone: admin.phone || admin.mobileNumber || '',
+      allowedTabs: Array.isArray(admin.allowedTabs) ? admin.allowedTabs : ['dashboard', 'devices', 'history'],
     });
     setShowAdminPassword(false);
     setShowEditAdminModal(true);
@@ -458,10 +473,34 @@ const AdminConsole = ({
                           </td>
 
                           <td>
-                            <span className={`admin-role-badge ${isSuper ? 'badge-admin' : 'badge-operator'}`}>
-                              <Shield size={12} />
-                              <span>{isSuper ? 'Administrator' : 'Operator'}</span>
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <span className={`admin-role-badge ${isSuper ? 'badge-admin' : 'badge-operator'}`}>
+                                <Shield size={12} />
+                                <span>{isSuper ? 'Administrator' : 'Operator'}</span>
+                              </span>
+                              {isSuper ? (
+                                <span style={{ fontSize: '11px', color: '#64748B', fontWeight: 600 }}>
+                                  Full Access (All Tabs)
+                                </span>
+                              ) : (
+                                <div className="operator-tabs-assigned-chips">
+                                  {Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0 ? (
+                                    u.allowedTabs.map((tid) => {
+                                      const tabDef = AVAILABLE_TABS.find((t) => t.id === tid);
+                                      return (
+                                        <span key={tid} className="operator-tab-chip">
+                                          {tabDef ? tabDef.label : tid}
+                                        </span>
+                                      );
+                                    })
+                                  ) : (
+                                    <span style={{ fontSize: '10.5px', color: '#94A3B8', fontStyle: 'italic' }}>
+                                      No tabs assigned
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </td>
 
                           <td>
@@ -655,6 +694,76 @@ const AdminConsole = ({
                 </div>
               </div>
 
+              {/* OPERATOR ACCESSIBLE TABS CHECKBOXES */}
+              {adminFormData.role === 'operator' && (
+                <div className="operator-tabs-container">
+                  <div className="operator-tabs-topbar">
+                    <div>
+                      <label className="operator-tabs-heading">
+                        <Layers size={14} />
+                        <span>Accessible Tabs for Operator</span>
+                      </label>
+                      <span className="operator-tabs-subtext">
+                        Select which tabs this operator account can view and access upon login
+                      </span>
+                    </div>
+                    <div className="operator-tabs-quick-actions">
+                      <button
+                        type="button"
+                        className="btn-tab-toggle"
+                        onClick={() =>
+                          setAdminFormData((prev) => ({
+                            ...prev,
+                            allowedTabs: AVAILABLE_TABS.map((t) => t.id),
+                          }))
+                        }
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-tab-toggle"
+                        onClick={() =>
+                          setAdminFormData((prev) => ({
+                            ...prev,
+                            allowedTabs: [],
+                          }))
+                        }
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="operator-tabs-grid">
+                    {AVAILABLE_TABS.map((tab) => {
+                      const isChecked = Boolean(adminFormData.allowedTabs?.includes(tab.id));
+                      return (
+                        <div
+                          key={tab.id}
+                          className={`operator-tab-card ${isChecked ? 'active' : ''}`}
+                          onClick={() => {
+                            const current = adminFormData.allowedTabs || [];
+                            const nextTabs = isChecked
+                              ? current.filter((t) => t !== tab.id)
+                              : [...current, tab.id];
+                            setAdminFormData((prev) => ({ ...prev, allowedTabs: nextTabs }));
+                          }}
+                        >
+                          <div className={`tab-checkbox-box ${isChecked ? 'checked' : ''}`}>
+                            {isChecked && <Check size={12} strokeWidth={3} />}
+                          </div>
+                          <div className="operator-tab-text">
+                            <span className="tab-name">{tab.label}</span>
+                            <span className="tab-desc">{tab.desc}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="auth-input-group">
                 <label>Phone Number (Optional)</label>
                 <div className="auth-input-wrapper">
@@ -670,7 +779,7 @@ const AdminConsole = ({
 
               <button type="submit" className="auth-submit-btn" disabled={adminModalLoading}>
                 {adminModalLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                <span>Create Administrator</span>
+                <span>{adminFormData.role === 'operator' ? 'Create Operator' : 'Create Administrator'}</span>
               </button>
             </form>
           </div>
@@ -768,6 +877,76 @@ const AdminConsole = ({
                   </label>
                 </div>
               </div>
+
+              {/* OPERATOR ACCESSIBLE TABS CHECKBOXES (EDIT) */}
+              {adminFormData.role === 'operator' && (
+                <div className="operator-tabs-container">
+                  <div className="operator-tabs-topbar">
+                    <div>
+                      <label className="operator-tabs-heading">
+                        <Layers size={14} />
+                        <span>Accessible Tabs for Operator</span>
+                      </label>
+                      <span className="operator-tabs-subtext">
+                        Select which tabs this operator account can view and access upon login
+                      </span>
+                    </div>
+                    <div className="operator-tabs-quick-actions">
+                      <button
+                        type="button"
+                        className="btn-tab-toggle"
+                        onClick={() =>
+                          setAdminFormData((prev) => ({
+                            ...prev,
+                            allowedTabs: AVAILABLE_TABS.map((t) => t.id),
+                          }))
+                        }
+                      >
+                        Select All
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-tab-toggle"
+                        onClick={() =>
+                          setAdminFormData((prev) => ({
+                            ...prev,
+                            allowedTabs: [],
+                          }))
+                        }
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="operator-tabs-grid">
+                    {AVAILABLE_TABS.map((tab) => {
+                      const isChecked = Boolean(adminFormData.allowedTabs?.includes(tab.id));
+                      return (
+                        <div
+                          key={tab.id}
+                          className={`operator-tab-card ${isChecked ? 'active' : ''}`}
+                          onClick={() => {
+                            const current = adminFormData.allowedTabs || [];
+                            const nextTabs = isChecked
+                              ? current.filter((t) => t !== tab.id)
+                              : [...current, tab.id];
+                            setAdminFormData((prev) => ({ ...prev, allowedTabs: nextTabs }));
+                          }}
+                        >
+                          <div className={`tab-checkbox-box ${isChecked ? 'checked' : ''}`}>
+                            {isChecked && <Check size={12} strokeWidth={3} />}
+                          </div>
+                          <div className="operator-tab-text">
+                            <span className="tab-name">{tab.label}</span>
+                            <span className="tab-desc">{tab.desc}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="auth-input-group">
                 <label>Phone Number</label>

@@ -42,6 +42,11 @@ const userSchema = new mongoose.Schema(
       default: 'USER',
       description: 'System role: ADMIN or USER',
     },
+    allowedTabs: {
+      type: [String],
+      default: [],
+      description: 'List of accessible tabs/pages for operator accounts',
+    },
     phone: {
       type: String,
       trim: true,
